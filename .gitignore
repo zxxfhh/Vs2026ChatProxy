@@ -1,0 +1,16 @@
+.vs
+obj
+bin
+*.user
+Swagger.xml
+.config
+.idea
+.trae
+.claude
+.ace-tool
+.playwright-mcp
+.vscode
+.github
+.gemini
+/openspec
+/docs

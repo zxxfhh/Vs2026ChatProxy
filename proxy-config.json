@@ -1,0 +1,48 @@
+{
+  "port": 11435,
+  "host": "127.0.0.1",
+  "providers": [
+    {
+      "type": "anthropic",
+      "name": "my-anthropic",
+      "baseUrl": "https://api.anthropic.com",
+      "apiKey": "sk-ant-YOUR-API-KEY",
+      "models": [
+        {
+          "id": "claude-sonnet-4-20250514",
+          "name": "Claude Sonnet 4",
+          "maxInputTokens": 200000,
+          "maxOutputTokens": 16384
+        }
+      ]
+    },
+    {
+      "type": "openai",
+      "name": "my-openai",
+      "baseUrl": "https://api.openai.com",
+      "apiKey": "sk-YOUR-API-KEY",
+      "models": [
+        {
+          "id": "gpt-4o",
+          "name": "GPT-4o",
+          "maxInputTokens": 128000,
+          "maxOutputTokens": 16384
+        }
+      ]
+    },
+    {
+      "type": "gemini",
+      "name": "my-gemini",
+      "baseUrl": "https://generativelanguage.googleapis.com",
+      "apiKey": "YOUR-GEMINI-API-KEY",
+      "models": [
+        {
+          "id": "gemini-2.5-pro",
+          "name": "Gemini 2.5 Pro",
+          "maxInputTokens": 1048576,
+          "maxOutputTokens": 65536
+        }
+      ]
+    }
+  ]
+}
