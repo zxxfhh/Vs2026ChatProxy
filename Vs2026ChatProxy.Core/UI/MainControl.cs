@@ -17,6 +17,15 @@ namespace Vs2026ChatProxy.UI
         private const long MaxLogFileSize = 10 * 1024 * 1024; // 10 MB
         private StreamWriter? _logWriter;
         private string _currentLogPath = "";
+        private bool _disposed;
+
+        // 保存日志回调引用，以便清理时取消订阅
+        private readonly Action<string> _logHandler;
+
+        // 日志节流：累积后批量刷新，减少 WinForms 重绘
+        private readonly List<(string text, Color color)> _pendingLogs = new();
+        private System.Windows.Forms.Timer? _logFlushTimer;
+        private const int LogFlushIntervalMs = 100; // 100ms 批量刷新一次
 
         public ProxyServer Server => _server;
 
@@ -24,7 +33,8 @@ namespace Vs2026ChatProxy.UI
         {
             _configPath = configPath;
             InitializeComponent();
-            _server.OnLog += msg => SafeInvoke(() => Log(msg));
+            _logHandler = msg => SafeInvoke(() => Log(msg));
+            _server.OnLog += _logHandler;
 
             // 初始化日志目录（与配置文件同目录）
             _logDir = Path.GetDirectoryName(_configPath) ?? AppContext.BaseDirectory;
@@ -32,6 +42,11 @@ namespace Vs2026ChatProxy.UI
             CleanOldLogFiles();
 
             LoadConfig();
+
+            // 日志批量刷新定时器
+            _logFlushTimer = new System.Windows.Forms.Timer { Interval = LogFlushIntervalMs };
+            _logFlushTimer.Tick += LogFlushTimer_Tick;
+            _logFlushTimer.Start();
         }
 
         /// <summary>创建新的日志文件</summary>
@@ -498,11 +513,20 @@ namespace Vs2026ChatProxy.UI
             return Color.FromArgb(180, 180, 180);
         }
 
+        /// <summary>清除日志</summary>
+        private void btnClearLog_Click(object sender, EventArgs e)
+        {
+            txtLog.Clear();
+            lock (_pendingLogs)
+                _pendingLogs.Clear();
+            Log("🧹 日志已清除");
+        }
+
         private void Log(string message)
         {
             var time = DateTime.Now.ToString("HH:mm:ss");
-            var line = $"[{time}] {message}";
 
+            // 文件日志：同步写入（AutoFlush 已开启）
             try
             {
                 var fileMsg = message.Length > 2000 ? message.Substring(0, 2000) + "...(截断)" : message;
@@ -511,31 +535,77 @@ namespace Vs2026ChatProxy.UI
             }
             catch { }
 
-            if (txtLog.IsDisposed || !txtLog.IsHandleCreated) return;
+            // UI 日志：累积到缓冲区，由定时器批量刷新
             var uiMsg = message.Length > 500 ? message.Substring(0, 500) + "..." : message;
-
-            txtLog.SelectionStart = txtLog.TextLength;
-            txtLog.SelectionLength = 0;
-            txtLog.SelectionColor = GetLogColor(message);
-            txtLog.AppendText($"[{time}] {uiMsg}\r\n");
-            txtLog.SelectionColor = txtLog.ForeColor;
-
-            if (txtLog.Lines.Length > 2000)
+            lock (_pendingLogs)
             {
-                txtLog.SelectionStart = 0;
-                txtLog.SelectionLength = txtLog.GetFirstCharIndexFromLine(500);
-                txtLog.SelectedText = "";
+                _pendingLogs.Add(($"[{time}] {uiMsg}", GetLogColor(message)));
+            }
+        }
+
+        /// <summary>定时批量刷新日志到 TextBox，减少 UI 重绘次数</summary>
+        private void LogFlushTimer_Tick(object? sender, EventArgs e)
+        {
+            if (_disposed || txtLog.IsDisposed || !txtLog.IsHandleCreated) return;
+
+            List<(string text, Color color)> batch;
+            lock (_pendingLogs)
+            {
+                if (_pendingLogs.Count == 0) return;
+                batch = new List<(string, Color)>(_pendingLogs);
+                _pendingLogs.Clear();
             }
 
-            txtLog.SelectionStart = txtLog.TextLength;
-            txtLog.ScrollToCaret();
+            txtLog.SuspendLayout();
+            try
+            {
+                foreach (var (text, color) in batch)
+                {
+                    txtLog.SelectionStart = txtLog.TextLength;
+                    txtLog.SelectionLength = 0;
+                    txtLog.SelectionColor = color;
+                    txtLog.AppendText($"{text}\r\n");
+                }
+                txtLog.SelectionColor = txtLog.ForeColor;
+
+                // 超出 2000 行时裁剪旧日志
+                if (txtLog.Lines.Length > 2000)
+                {
+                    txtLog.SelectionStart = 0;
+                    txtLog.SelectionLength = txtLog.GetFirstCharIndexFromLine(500);
+                    txtLog.SelectedText = "";
+                }
+
+                txtLog.SelectionStart = txtLog.TextLength;
+                txtLog.ScrollToCaret();
+            }
+            finally
+            {
+                txtLog.ResumeLayout();
+            }
         }
 
         /// <summary>停止代理并清理资源（供宿主调用）</summary>
         public async Task CleanupAsync()
         {
+            if (_disposed) return;
+            _disposed = true;
+
+            // 取消事件订阅，防止 GC Root 泄漏
+            _server.OnLog -= _logHandler;
+
             if (_server.IsRunning) await _server.StopAsync();
-            try { _logWriter?.Close(); } catch { }
+
+            // 停止日志刷新定时器
+            if (_logFlushTimer != null)
+            {
+                _logFlushTimer.Stop();
+                _logFlushTimer.Dispose();
+                _logFlushTimer = null;
+            }
+
+            try { _logWriter?.Dispose(); } catch { }
+            _logWriter = null;
         }
     }
 }

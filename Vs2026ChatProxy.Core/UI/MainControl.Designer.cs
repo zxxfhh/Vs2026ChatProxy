@@ -20,6 +20,7 @@ namespace Vs2026ChatProxy.UI
         // ── 下半部分：日志 ────────────────────────────────
         private GroupBox grpLog;
         private RichTextBox txtLog;
+        private Button btnClearLog;
 
         // ── 底部：状态栏 + 控制按钮 ──────────────────────
         private Panel pnlBottom;
@@ -32,7 +33,11 @@ namespace Vs2026ChatProxy.UI
 
         protected override void Dispose(bool disposing)
         {
-            if (disposing && components != null) components.Dispose();
+            if (disposing)
+            {
+                components?.Dispose();
+                _ = CleanupAsync();
+            }
             base.Dispose(disposing);
         }
 
@@ -54,6 +59,7 @@ namespace Vs2026ChatProxy.UI
             btnDelProvider = new Button();
             grpLog = new GroupBox();
             txtLog = new RichTextBox();
+            btnClearLog = new Button();
             pnlBottom = new Panel();
             bottomTlp = new TableLayoutPanel();
             lblStatus = new Label();
@@ -237,6 +243,7 @@ namespace Vs2026ChatProxy.UI
             // grpLog
             //
             grpLog.Controls.Add(txtLog);
+            grpLog.Controls.Add(btnClearLog);
             grpLog.Dock = DockStyle.Fill;
             grpLog.Font = new Font("Microsoft YaHei UI", 9.5F, FontStyle.Bold);
             grpLog.Location = new Point(3, 266);
@@ -261,6 +268,22 @@ namespace Vs2026ChatProxy.UI
             txtLog.Size = new Size(897, 275);
             txtLog.TabIndex = 0;
             txtLog.Text = "";
+            //
+            // btnClearLog
+            //
+            btnClearLog.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            btnClearLog.BackColor = Color.FromArgb(50, 50, 50);
+            btnClearLog.FlatStyle = FlatStyle.Flat;
+            btnClearLog.Font = new Font("Microsoft YaHei UI", 8F);
+            btnClearLog.ForeColor = Color.FromArgb(180, 180, 180);
+            btnClearLog.Location = new Point(815, 0);
+            btnClearLog.Margin = new Padding(0);
+            btnClearLog.Name = "btnClearLog";
+            btnClearLog.Size = new Size(80, 22);
+            btnClearLog.TabIndex = 1;
+            btnClearLog.Text = "清除";
+            btnClearLog.UseVisualStyleBackColor = false;
+            btnClearLog.Click += btnClearLog_Click;
             //
             // pnlBottom
             //

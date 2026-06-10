@@ -32,6 +32,21 @@ namespace Vs2026ChatProxy.Providers
         public string Arguments { get; set; } = "";
     }
 
+    // ── 推理级别 ─────────────────────────────────────────────
+
+    /// <summary>
+    /// 推理模式级别。
+    /// 参考 CopilotProxy 的 thinking mode，支持从模型名称中解析。
+    /// </summary>
+    public enum ThinkingEffort
+    {
+        None,
+        Low,
+        Medium,
+        High,
+        Maximum
+    }
+
     // ── 对话选项 ─────────────────────────────────────────────
 
     public class ChatOptions
@@ -46,6 +61,9 @@ namespace Vs2026ChatProxy.Providers
 
         /// <summary>工具选择策略：OpenAI 原始 JSON（字符串 "auto" 或对象）</summary>
         public JToken? ToolChoice { get; set; }
+
+        /// <summary>推理模式级别（从模型名称解析，如 "model/5_(maximum)"）</summary>
+        public ThinkingEffort ThinkingEffort { get; set; } = ThinkingEffort.None;
     }
 
     // ── 完整响应（非流式） ───────────────────────────────────

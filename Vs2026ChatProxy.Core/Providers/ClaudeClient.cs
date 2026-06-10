@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Net.Http.Headers;
 using System.Runtime.CompilerServices;
 using Newtonsoft.Json;
@@ -18,6 +19,9 @@ namespace Vs2026ChatProxy.Providers
         private readonly string _baseUrl;
         private readonly ProviderConfig _provider;
 
+        // 复用 HttpClient：按 Provider 身份缓存，避免 Socket 耗尽
+        private static readonly ConcurrentDictionary<string, HttpClient> _httpCache = new();
+
         public ClaudeClient(ProviderConfig provider)
         {
             _provider = provider;
@@ -25,15 +29,19 @@ namespace Vs2026ChatProxy.Providers
             _baseUrl = (provider.BaseUrl ?? "https://api.anthropic.com").TrimEnd('/');
         }
 
-        private HttpClient CreateHttpClient()
+        private HttpClient GetOrCreateHttpClient()
         {
-            var client = new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
-            client.DefaultRequestHeaders.Add("x-api-key", _apiKey);
-            client.DefaultRequestHeaders.Add("anthropic-version", "2023-06-01");
-            client.DefaultRequestHeaders.Add("anthropic-dangerous-direct-browser-access", "true");
-            client.DefaultRequestHeaders.Accept
-                .Add(new MediaTypeWithQualityHeaderValue("application/json"));
-            return client;
+            var key = $"{_apiKey}:{_baseUrl}";
+            return _httpCache.GetOrAdd(key, _ =>
+            {
+                var client = new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
+                client.DefaultRequestHeaders.Add("x-api-key", _apiKey);
+                client.DefaultRequestHeaders.Add("anthropic-version", "2023-06-01");
+                client.DefaultRequestHeaders.Add("anthropic-dangerous-direct-browser-access", "true");
+                client.DefaultRequestHeaders.Accept
+                    .Add(new MediaTypeWithQualityHeaderValue("application/json"));
+                return client;
+            });
         }
 
         private object BuildBody(List<ChatMessage> messages, ChatOptions options, bool stream)
@@ -86,7 +94,8 @@ namespace Vs2026ChatProxy.Providers
             var body = new Dictionary<string, object>
             {
                 ["model"] = options.Model,
-                ["max_tokens"] = options.MaxTokens,
+                // Claude API 的 max_tokens 是必填的，0 表示不限制需要给兜底值
+                ["max_tokens"] = options.MaxTokens > 0 ? options.MaxTokens : 131072,
                 ["messages"] = apiMessages,
                 ["stream"] = stream,
             };
@@ -96,6 +105,23 @@ namespace Vs2026ChatProxy.Providers
 
             if (options.Temperature != 0.7)
                 body["temperature"] = options.Temperature;
+
+            // 推理模式（extended thinking）：参考 CopilotProxy 的 applyThinkingMode
+            if (options.ThinkingEffort != ThinkingEffort.None)
+            {
+                var budget = Vs2026ChatProxy.Proxy.ThinkingModeParser.ToBudgetTokens(options.ThinkingEffort);
+                var thinkingObj = new Dictionary<string, object>
+                {
+                    ["type"] = "enabled",
+                };
+                if (budget.HasValue)
+                    thinkingObj["budget_tokens"] = budget.Value;
+
+                body["thinking"] = thinkingObj;
+
+                // 推理模式下 Claude 不支持 temperature
+                body.Remove("temperature");
+            }
 
             // 工具定义转换（OpenAI → Anthropic 格式）
             var anthropicTools = ConvertToolsToAnthropicFormat(options.Tools);
@@ -121,7 +147,7 @@ namespace Vs2026ChatProxy.Providers
         public async Task<ChatResult> ChatAsync(
             List<ChatMessage> messages, ChatOptions options, CancellationToken ct = default)
         {
-            using var http = CreateHttpClient();
+            var http = GetOrCreateHttpClient();
             var url = $"{_baseUrl}/v1/messages";
             var body = BuildBody(messages, options, false);
             var json = JsonConvert.SerializeObject(body);
@@ -176,7 +202,7 @@ namespace Vs2026ChatProxy.Providers
             List<ChatMessage> messages, ChatOptions options,
             [EnumeratorCancellation] CancellationToken ct = default)
         {
-            using var http = CreateHttpClient();
+            var http = GetOrCreateHttpClient();
             var url = $"{_baseUrl}/v1/messages";
             var body = BuildBody(messages, options, true);
             var json = JsonConvert.SerializeObject(body);

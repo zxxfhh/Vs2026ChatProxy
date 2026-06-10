@@ -12,13 +12,22 @@ namespace Vs2026ChatProxy.Proxy
     /// </summary>
     public static class ChatHandler
     {
-        public static async Task HandleAsync(Stream requestBody, Stream responseBody, ProxyConfig config, Action<string>? onLog, CancellationToken ct, int compactThreshold = 85)
+        /// <summary>请求体最大大小限制：10 MB</summary>
+        private const int MaxRequestBodySize = 10 * 1024 * 1024;
+
+        public static async Task HandleAsync(Stream requestBody, Stream responseBody, ProxyConfig config, Action<string>? onLog, CancellationToken ct, int compactThreshold = 85, SessionManager? sessions = null)
         {
             // 读取请求体（读完立即关闭，避免占用连接）
             string reqJson;
             {
                 using var ms = new MemoryStream();
-                await requestBody.CopyToAsync(ms, 81920);
+                await requestBody.CopyToAsync(ms, 81920, ct);
+                if (ms.Length > MaxRequestBodySize)
+                {
+                    onLog?.Invoke($"   ❌ 请求体过大: {ms.Length} bytes");
+                    await WriteErrorAsync(responseBody, 413, "Request body too large", "request_too_large");
+                    return;
+                }
                 reqJson = Encoding.UTF8.GetString(ms.ToArray());
             }
 
@@ -33,14 +42,24 @@ namespace Vs2026ChatProxy.Proxy
             var modelStr = !string.IsNullOrEmpty(config.DefaultModel) ? config.DefaultModel : reqModel;
             onLog?.Invoke($"   请求模型: {reqModel} → 实际使用: {modelStr} | 消息数: {msgCount} | 流式: {useStream} | tools: {toolCount}");
 
-            // 完整请求 JSON 写日志（不截断）
-            onLog?.Invoke($"   🔎 完整请求: {reqJson}");
+            // 请求 JSON 摘要日志（超长截断避免 LOH 压力）
+            var reqJsonPreview = reqJson.Length > 1000
+                ? reqJson.Substring(0, 1000) + $"...(共 {reqJson.Length} 字符)"
+                : reqJson;
+            onLog?.Invoke($"   🔎 请求摘要: {reqJsonPreview}");
 
             // 解码 model → provider + modelId
+            // 同时解析推理模式（如 "provider:model-id/5_(maximum)"）
             string providerName, modelId;
+            ThinkingEffort thinkingEffort = ThinkingEffort.None;
             try
             {
-                (providerName, modelId) = ModelEncoding.Decode(modelStr);
+                // 先尝试解析推理模式后缀
+                var (decoded, effort) = ThinkingModeParser.Parse(modelStr);
+                thinkingEffort = effort;
+
+                // 如果解析出了推理级别，用清理后的模型名继续解码
+                (providerName, modelId) = ModelEncoding.Decode(effort != ThinkingEffort.None ? decoded : modelStr);
             }
             catch (ArgumentException ex)
             {
@@ -68,6 +87,10 @@ namespace Vs2026ChatProxy.Proxy
 
             onLog?.Invoke($"   ✅ {provider.Type} → {provider.BaseUrl} | 模型: {modelId}");
 
+            // 会话跟踪（用于 KV Cache 保持和并发管理）
+            var sessionId = SessionManager.DeriveSessionId(ConvertMessages(req["messages"] as JArray));
+            sessions?.TrackRequest(sessionId, providerName, modelId);
+
             // 转换 OpenAI messages → ChatMessage 列表
             var messages = ConvertMessages(req["messages"] as JArray);
 
@@ -85,23 +108,49 @@ namespace Vs2026ChatProxy.Proxy
                 // 压缩失败不阻塞主流程，用原始消息继续
             }
 
+            // MaxTokens 策略：
+            // 1. 客户端明确传了 max_tokens → 使用客户端值
+            // 2. 未传 → 默认 128K
+            var clientMaxTokens = req["max_tokens"]?.Value<int>();
+            int effectiveMaxTokens;
+            if (clientMaxTokens.HasValue && clientMaxTokens.Value > 0)
+            {
+                effectiveMaxTokens = clientMaxTokens.Value;
+            }
+            else
+            {
+                effectiveMaxTokens = 131072; // 默认 128K
+            }
+
             var options = new ChatOptions
             {
                 Model = model.Id,
                 Temperature = req["temperature"]?.Value<double>() ?? 0.7,
-                MaxTokens = req["max_tokens"]?.Value<int>() ?? 4096,
+                MaxTokens = effectiveMaxTokens,
                 Tools = (toolCount > 0) ? toolsArray : null,
                 ToolChoice = req["tool_choice"],
             };
+
+            onLog?.Invoke($"   📏 MaxTokens={effectiveMaxTokens} (模型上下文={model.MaxContextTokens}, 客户端传值={clientMaxTokens?.ToString() ?? "null"})");
+
+            // 应用推理模式（参考 CopilotProxy 的 applyThinkingMode）
+            if (thinkingEffort != ThinkingEffort.None)
+            {
+                options.ThinkingEffort = thinkingEffort;
+                onLog?.Invoke($"   🧠 推理模式: {thinkingEffort} (budget={ThinkingModeParser.ToBudgetTokens(thinkingEffort)?.ToString() ?? "无限"})");
+            }
 
             var client = AiClientFactory.Create(provider);
 
             try
             {
-                // 日志：请求消息完整内容
+                // 日志：请求消息摘要（避免长内容导致 LOH 压力）
                 foreach (var msg in messages)
                 {
-                    onLog?.Invoke($"   📥 [{msg.Role}] {msg.Content}");
+                    var preview = msg.Content?.Length > 200
+                        ? msg.Content.Substring(0, 200) + $"...(共 {msg.Content.Length} 字符)"
+                        : msg.Content;
+                    onLog?.Invoke($"   📥 [{msg.Role}] {preview}");
                 }
 
                 if (useStream)
@@ -109,9 +158,13 @@ namespace Vs2026ChatProxy.Proxy
                 else
                     await HandleNonStreamAsync(responseBody, client, messages, options, modelStr, onLog, ct);
             }
+            catch (HttpListenerException ex)
+            {
+                // 客户端主动断开连接（超时/用户取消/连接丢失），不是服务端错误
+                onLog?.Invoke($"   ⚠️ 客户端已断开连接（{ex.ErrorCode}: {ex.Message}）");
+            }
             catch (Exception ex)
             {
-                // 流式中途出错
                 onLog?.Invoke($"   ❌ 流式异常: {ex.GetType().Name}: {ex.Message}");
                 if (ex.InnerException != null)
                     onLog?.Invoke($"      内部异常: {ex.InnerException.Message}");
@@ -127,67 +180,222 @@ namespace Vs2026ChatProxy.Proxy
             // 注意: headers 由 ProxyServer 在 HttpContext 层设置，这里直接写 body
 
             var chunkId = SseWriter.NewChunkId();
-            var sb = new StringBuilder();
+            var totalChars = 0; // 仅统计字符数用于日志，不累积完整内容避免 LOH 压力
+            var hasToolCalls = false; // 跟踪是否有 tool_calls
 
             // 发送 role chunk
             await SseWriter.WriteEventAsync(body, SseWriter.CreateRoleChunk(chunkId, displayModel), ct);
             await SseWriter.FlushAsync(body, ct);
 
-            // 活跃 tool call 追踪
-            var activeToolCalls = new Dictionary<int, (string id, string name)>();
+            // 保活心跳：等待上游第一个 chunk 期间，每 15 秒发 SSE 注释防止客户端超时断开
+            var keepaliveBytes = System.Text.Encoding.UTF8.GetBytes(": keep-alive\n\n");
+            var firstChunkReceived = false;
 
-            await foreach (var chunk in client.ChatStreamAsync(messages, options, ct))
+            // ── Tool Call 累积器 ──
+            // 参考 CopilotProxy stream-handler.js 的 reconstructToolCalls：
+            // 先累积所有 delta 片段，流结束后一次性 normalize 再输出。
+            // VS 2026 对不完整/参数错误的 tool call 极度敏感，必须输出规范化后的完整 tool call。
+            var tcBuilders = new Dictionary<int, (string id, string type, string name, string arguments)>();
+
+            // 用定时器在等待上游响应时发保活心跳
+            using var keepaliveCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            var keepaliveTask = Task.Run(async () =>
             {
-                if (!string.IsNullOrEmpty(chunk.Content))
+                try
                 {
-                    sb.Append(chunk.Content);
-                    await SseWriter.WriteEventAsync(body, SseWriter.CreateContentChunk(chunkId, displayModel, chunk.Content), ct);
-                    await SseWriter.FlushAsync(body, ct);
-                }
-
-                if (chunk.ToolCalls?.Count > 0)
-                {
-                    foreach (var tc in chunk.ToolCalls)
+                    while (!keepaliveCts.Token.IsCancellationRequested)
                     {
-                        var idx = 0; // 简化：单 tool call
-                        var id = tc.Id;
-                        var name = tc.Name;
+                        await Task.Delay(15000, keepaliveCts.Token);
+                        if (firstChunkReceived) break;
+                        await body.WriteAsync(keepaliveBytes, keepaliveCts.Token);
+                        await body.FlushAsync(keepaliveCts.Token);
+                    }
+                }
+                catch (OperationCanceledException) { }
+                catch { /* 连接已断开 */ }
+            }, keepaliveCts.Token);
 
-                        if (!string.IsNullOrEmpty(id))
-                            activeToolCalls[idx] = (id, name);
-                        else if (activeToolCalls.TryGetValue(idx, out var existing))
-                            name = string.IsNullOrEmpty(name) ? existing.name : name;
+            // 累积纯文本内容（用于文本中的工具调用提取）
+            var fullContent = new StringBuilder();
 
-                        await SseWriter.WriteEventAsync(body,
-                            SseWriter.CreateToolCallChunk(chunkId, displayModel, idx,
-                                id ?? (activeToolCalls.TryGetValue(idx, out var tcEntry) ? tcEntry.id : null) ?? "",
-                                name ?? "",
-                                tc.Arguments), ct);
-                        await SseWriter.FlushAsync(body, ct);
+            try
+            {
+                await foreach (var chunk in client.ChatStreamAsync(messages, options, ct))
+                {
+                    firstChunkReceived = true; // 收到第一个 chunk，停止心跳
+
+                    if (!string.IsNullOrEmpty(chunk.Content))
+                    {
+                        totalChars += chunk.Content.Length;
+                        fullContent.Append(chunk.Content);
+
+                        // 如果还没检测到结构化 tool call，先暂存文本
+                        // （稍后可能需要从文本中提取工具调用）
+                        if (!hasToolCalls)
+                        {
+                            await SseWriter.WriteEventAsync(body, SseWriter.CreateContentChunk(chunkId, displayModel, chunk.Content), ct);
+                            await SseWriter.FlushAsync(body, ct);
+                        }
+                    }
+
+                    if (chunk.ToolCalls?.Count > 0)
+                    {
+                        hasToolCalls = true;
+
+                        // 累积 tool call delta（参考 CopilotProxy 的 tcBuilders 机制）
+                        foreach (var tc in chunk.ToolCalls)
+                        {
+                            var idx = 0; // 简化：单 tool call
+                            if (!tcBuilders.TryGetValue(idx, out var existing))
+                            {
+                                existing = ("", "function", "", "");
+                            }
+                            // 增量拼接
+                            var newId = !string.IsNullOrEmpty(tc.Id) ? tc.Id : existing.id;
+                            var newName = !string.IsNullOrEmpty(tc.Name) ? tc.Name : existing.name;
+                            var newArgs = existing.arguments + (tc.Arguments ?? "");
+                            tcBuilders[idx] = (newId, "function", newName, newArgs);
+                        }
+                    }
+
+                    // 上游 finish_reason 到达时，不立即输出给客户端
+                    // 等后续 normalize 完成后再输出
+                    if (!string.IsNullOrEmpty(chunk.FinishReason))
+                    {
+                        // 标记但不输出 —— 在 finally 块中统一输出
+                    }
+                }
+            }
+            finally
+            {
+                keepaliveCts.Cancel();
+                try { await keepaliveTask; } catch { }
+            }
+
+            // ── Tool Call 后处理：规范化 + 输出 ──
+            if (hasToolCalls && tcBuilders.Count > 0)
+            {
+                // 1. 拼装完整的 ToolCall 列表
+                var rawToolCalls = tcBuilders.OrderBy(kv => kv.Key)
+                    .Select(kv => new ToolCall
+                    {
+                        Id = !string.IsNullOrEmpty(kv.Value.id) ? kv.Value.id : $"call_{Guid.NewGuid():N}",
+                        Name = kv.Value.name,
+                        Arguments = kv.Value.arguments
+                    }).ToList();
+
+                // 2. 对每个 tool call 做规范化（修复 JSON、填充默认值、路径修正等）
+                var normalizedCalls = ToolCallNormalizer.NormalizeAll(rawToolCalls);
+
+                // 3. 如果 normalize 后全部被丢弃（返回空），尝试从累积文本中提取
+                if (normalizedCalls.Count == 0 && fullContent.Length > 0)
+                {
+                    var (cleanText, extractedCalls) = ToolCallNormalizer.ExtractFromText(fullContent.ToString());
+                    if (extractedCalls.Count > 0)
+                    {
+                        normalizedCalls = extractedCalls;
                     }
                 }
 
-                if (!string.IsNullOrEmpty(chunk.FinishReason))
+                // 4. 输出规范化后的完整 tool calls（一次性输出，VS 不会收到残缺数据）
+                for (int i = 0; i < normalizedCalls.Count; i++)
                 {
-                    onLog?.Invoke($"   🏁 finish_reason: {chunk.FinishReason}");
-                    await SseWriter.WriteEventAsync(body, SseWriter.CreateFinishChunk(chunkId, displayModel, chunk.FinishReason), ct);
+                    var tc = normalizedCalls[i];
+                    onLog?.Invoke($"   🔧 tool_call[{i}]: {tc.Name}({(tc.Arguments?.Length > 200 ? tc.Arguments.Substring(0, 200) + "..." : tc.Arguments)})");
+                    await SseWriter.WriteEventAsync(body,
+                        SseWriter.CreateToolCallChunk(chunkId, displayModel, i,
+                            tc.Id, tc.Name, tc.Arguments ?? "{}"), ct);
+                    await SseWriter.FlushAsync(body, ct);
+                }
+
+                // 5. finish_reason = "tool_calls"
+                onLog?.Invoke($"   🏁 finish_reason: stop → tool_calls ({normalizedCalls.Count} tool calls)");
+                await SseWriter.WriteEventAsync(body, SseWriter.CreateFinishChunk(chunkId, displayModel, "tool_calls"), ct);
+                await SseWriter.FlushAsync(body, ct);
+            }
+            else
+            {
+                // 没有工具调用 → 正常结束
+                // 如果有累积文本但没检测到结构化 tool call，尝试从文本提取
+                if (fullContent.Length > 0)
+                {
+                    var (cleanText, extractedCalls) = ToolCallNormalizer.ExtractFromText(fullContent.ToString());
+                    if (extractedCalls.Count > 0)
+                    {
+                        // 从文本中提取到了工具调用！
+                        for (int i = 0; i < extractedCalls.Count; i++)
+                        {
+                            var tc = extractedCalls[i];
+                            onLog?.Invoke($"   🔧 extracted tool_call[{i}]: {tc.Name}");
+                            await SseWriter.WriteEventAsync(body,
+                                SseWriter.CreateToolCallChunk(chunkId, displayModel, i,
+                                    tc.Id, tc.Name, tc.Arguments ?? "{}"), ct);
+                            await SseWriter.FlushAsync(body, ct);
+                        }
+                        hasToolCalls = true;
+                        onLog?.Invoke($"   🏁 finish_reason: stop → tool_calls ({extractedCalls.Count} extracted from text)");
+                        await SseWriter.WriteEventAsync(body, SseWriter.CreateFinishChunk(chunkId, displayModel, "tool_calls"), ct);
+                        await SseWriter.FlushAsync(body, ct);
+                    }
+                    else
+                    {
+                        await SseWriter.WriteEventAsync(body, SseWriter.CreateFinishChunk(chunkId, displayModel, "stop"), ct);
+                        await SseWriter.FlushAsync(body, ct);
+                    }
+                }
+                else
+                {
+                    await SseWriter.WriteEventAsync(body, SseWriter.CreateFinishChunk(chunkId, displayModel, "stop"), ct);
                     await SseWriter.FlushAsync(body, ct);
                 }
             }
 
-            onLog?.Invoke($"   ✅ 流式结束，共 {sb.Length} 字符");
+            onLog?.Invoke($"   ✅ 流式结束，共 {totalChars} 字符");
 
-            await SseWriter.WriteDoneAsync(body, ct);
-            await SseWriter.FlushAsync(body, ct);
-
-            // 日志：返回完整内容
-            onLog?.Invoke($"   📤 [assistant] {sb}");
+            try
+            {
+                await SseWriter.WriteDoneAsync(body, ct);
+                await SseWriter.FlushAsync(body, ct);
+            }
+            catch
+            {
+                // 客户端收到 tool_calls 后可能已主动断开，[DONE] 发不出是正常的
+                if (hasToolCalls)
+                    onLog?.Invoke($"   ℹ️ tool_calls 已发送，客户端已关闭（正常行为）");
+                else
+                    onLog?.Invoke($"   ⚠️ 客户端已断开连接");
+            }
         }
 
         private static async Task HandleNonStreamAsync(Stream body, IChatClient client,
             List<ChatMessage> messages, ChatOptions options, string displayModel, Action<string>? onLog, CancellationToken ct)
         {
             var result = await client.ChatAsync(messages, options, ct);
+
+            // ── Tool Call 规范化 ──
+            // 参考 CopilotProxy server.js 的 normalizeToolCall 逻辑：
+            // 修复 JSON、填充默认值、路径修正、字段别名映射。
+            var toolCalls = result.ToolCalls;
+            bool hasExtractedFromText = false;
+
+            if (toolCalls.Count > 0)
+            {
+                toolCalls = ToolCallNormalizer.NormalizeAll(toolCalls);
+            }
+            else if (!string.IsNullOrEmpty(result.Content))
+            {
+                // 没有结构化 tool call → 尝试从文本中提取（XML/Markdown/JSON 格式）
+                var (cleanText, extractedCalls) = ToolCallNormalizer.ExtractFromText(result.Content ?? "");
+                if (extractedCalls.Count > 0)
+                {
+                    toolCalls = extractedCalls;
+                    hasExtractedFromText = true;
+                    result.Content = cleanText; // 用清理后的文本替换
+                }
+            }
+
+            // 关键修复：当有 tool_calls 时，finish_reason 必须是 "tool_calls"
+            var effectiveFinishReason = toolCalls.Count > 0 ? "tool_calls" : (result.FinishReason ?? "stop");
 
             var completion = new
             {
@@ -203,9 +411,10 @@ namespace Vs2026ChatProxy.Proxy
                         message = new
                         {
                             role = "assistant",
-                            content = result.Content,
-                            tool_calls = result.ToolCalls.Count > 0
-                                ? result.ToolCalls.Select(tc => new
+                            // 有工具调用时 content 设为 null（参考 CopilotProxy）
+                            content = toolCalls.Count > 0 ? (string?)null : result.Content,
+                            tool_calls = toolCalls.Count > 0
+                                ? toolCalls.Select(tc => new
                                 {
                                     id = tc.Id,
                                     type = "function",
@@ -213,7 +422,7 @@ namespace Vs2026ChatProxy.Proxy
                                 }).ToArray()
                                 : null
                         },
-                        finish_reason = result.FinishReason
+                        finish_reason = effectiveFinishReason
                     }
                 },
                 usage = new
@@ -229,8 +438,21 @@ namespace Vs2026ChatProxy.Proxy
             await body.WriteAsync(bytes, ct);
             await body.FlushAsync(ct);
 
-            // 日志：返回完整内容
-            onLog?.Invoke($"   📤 [assistant] {result.Content}");
+            // 日志：返回内容（超长截断避免 LOH 压力）
+            if (toolCalls.Count > 0)
+            {
+                foreach (var tc in toolCalls)
+                    onLog?.Invoke($"   🔧 tool_call: {tc.Name}({(tc.Arguments?.Length > 200 ? tc.Arguments.Substring(0, 200) + "..." : tc.Arguments)})");
+                if (hasExtractedFromText)
+                    onLog?.Invoke($"   📤 [assistant] (工具调用从文本中提取，共 {toolCalls.Count} 个)");
+            }
+            else
+            {
+                var contentPreview = result.Content?.Length > 500
+                    ? result.Content.Substring(0, 500) + $"...(共 {result.Content.Length} 字符)"
+                    : result.Content;
+                onLog?.Invoke($"   📤 [assistant] {contentPreview}");
+            }
             if (result.PromptTokens > 0 || result.CompletionTokens > 0)
                 onLog?.Invoke($"   📊 tokens: prompt={result.PromptTokens} completion={result.CompletionTokens}");
         }

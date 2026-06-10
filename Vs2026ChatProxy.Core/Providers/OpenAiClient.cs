@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Net.Http.Headers;
 using System.Runtime.CompilerServices;
 using Newtonsoft.Json;
@@ -16,8 +17,10 @@ namespace Vs2026ChatProxy.Providers
     {
         protected readonly string ApiKey;
         protected readonly string BaseUrl;
-        protected readonly int TimeoutSeconds;
         protected readonly ProviderConfig Provider;
+
+        // 复用 HttpClient：按 Provider 身份（ApiKey+BaseUrl）缓存，避免 Socket 耗尽
+        private static readonly ConcurrentDictionary<string, HttpClient> _httpCache = new();
 
         public OpenAiClient(ProviderConfig provider, string defaultBaseUrl = "https://api.openai.com")
         {
@@ -25,7 +28,26 @@ namespace Vs2026ChatProxy.Providers
             ApiKey = provider.ApiKey ?? "";
             var configuredBase = string.IsNullOrWhiteSpace(provider.BaseUrl) ? defaultBaseUrl : provider.BaseUrl;
             BaseUrl = configuredBase.TrimEnd('/');
-            TimeoutSeconds = 120;
+        }
+
+        /// <summary>按 Provider 身份复用 HttpClient 实例</summary>
+        private static string GetCacheKey(string apiKey, string baseUrl) => $"{apiKey}:{baseUrl}";
+
+        protected virtual HttpClient GetOrCreateHttpClient()
+        {
+            var key = GetCacheKey(ApiKey, BaseUrl);
+            return _httpCache.GetOrAdd(key, _ =>
+            {
+                var client = new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
+                if (!string.IsNullOrEmpty(ApiKey))
+                {
+                    client.DefaultRequestHeaders.Authorization =
+                        new AuthenticationHeaderValue("Bearer", ApiKey);
+                }
+                client.DefaultRequestHeaders.Accept
+                    .Add(new MediaTypeWithQualityHeaderValue("application/json"));
+                return client;
+            });
         }
 
         /// <summary>
@@ -42,19 +64,6 @@ namespace Vs2026ChatProxy.Providers
             if (System.Text.RegularExpressions.Regex.IsMatch(b, @"/v\d+(/.*)?$"))
                 return b + relativePath;
             return b + "/v1" + relativePath;
-        }
-
-        protected virtual HttpClient CreateHttpClient()
-        {
-            var client = new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
-            if (!string.IsNullOrEmpty(ApiKey))
-            {
-                client.DefaultRequestHeaders.Authorization =
-                    new AuthenticationHeaderValue("Bearer", ApiKey);
-            }
-            client.DefaultRequestHeaders.Accept
-                .Add(new MediaTypeWithQualityHeaderValue("application/json"));
-            return client;
         }
 
         protected virtual object BuildRequestBody(List<ChatMessage> messages, ChatOptions options, bool stream)
@@ -96,9 +105,12 @@ namespace Vs2026ChatProxy.Providers
                 ["messages"] = msgs,
                 ["temperature"] = options.Temperature,
                 ["top_p"] = options.TopP,
-                ["max_tokens"] = options.MaxTokens,
                 ["stream"] = stream,
             };
+
+            // max_tokens = 0 表示不限制，不传给上游（让模型自行决定输出长度）
+            if (options.MaxTokens > 0)
+                body["max_tokens"] = options.MaxTokens;
 
             if (stream)
                 body["stream_options"] = new { include_usage = true };
@@ -109,6 +121,14 @@ namespace Vs2026ChatProxy.Providers
             if (options.ToolChoice != null)
                 body["tool_choice"] = options.ToolChoice;
 
+            // 推理模式：DeepSeek 使用 reasoning_effort，OpenAI o1/o3 使用 reasoning_effort
+            if (options.ThinkingEffort != ThinkingEffort.None)
+            {
+                var reasoningEffort = Vs2026ChatProxy.Proxy.ThinkingModeParser.ToReasoningEffort(options.ThinkingEffort);
+                if (reasoningEffort != null)
+                    body["reasoning_effort"] = reasoningEffort;
+            }
+
             return body;
         }
 
@@ -117,7 +137,7 @@ namespace Vs2026ChatProxy.Providers
         public virtual async Task<ChatResult> ChatAsync(
             List<ChatMessage> messages, ChatOptions options, CancellationToken ct = default)
         {
-            using var http = CreateHttpClient();
+            var http = GetOrCreateHttpClient();
             var url = BuildUrl("/chat/completions");
             var body = BuildRequestBody(messages, options, false);
             var json = JsonConvert.SerializeObject(body);
@@ -173,7 +193,7 @@ namespace Vs2026ChatProxy.Providers
             List<ChatMessage> messages, ChatOptions options,
             [EnumeratorCancellation] CancellationToken ct = default)
         {
-            using var http = CreateHttpClient();
+            var http = GetOrCreateHttpClient();
             var url = BuildUrl("/chat/completions");
             var body = BuildRequestBody(messages, options, true);
             var json = JsonConvert.SerializeObject(body);

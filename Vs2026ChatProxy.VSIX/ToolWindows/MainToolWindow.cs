@@ -12,6 +12,8 @@ namespace Vs2026ChatProxy.VSIX.ToolWindows
     [Guid("b5c6d7e8-f9a0-1234-bcde-f01234567891")]
     public class MainToolWindow : ToolWindowPane
     {
+        private Vs2026ChatProxy.UI.MainControl _mainControl; // default null
+
         public MainToolWindow() : base(null)
         {
             this.Caption = "VsCopilotProxy";
@@ -23,17 +25,17 @@ namespace Vs2026ChatProxy.VSIX.ToolWindows
                 Debug.WriteLine($"[VsCopilotProxy] ConfigPath={configPath}");
 
                 // 创建 WinForms MainControl
-                var mainControl = new Vs2026ChatProxy.UI.MainControl(configPath);
+                _mainControl = new Vs2026ChatProxy.UI.MainControl(configPath);
 
                 // 强制浅色背景，防止 VS 深色主题导致黑底黑字
-                ForceLightTheme(mainControl);
+                ForceLightTheme(_mainControl);
 
                 Debug.WriteLine("[VsCopilotProxy] MainControl created OK");
 
                 // 关键：ToolWindowPane.Content 需要 WPF 控件，
                 // 用 WindowsFormsHost 包装 WinForms 控件
                 var host = new WindowsFormsHost();
-                host.Child = mainControl;
+                host.Child = _mainControl;
                 this.Content = host;
                 Debug.WriteLine("[VsCopilotProxy] WindowsFormsHost set as Content OK");
             }
@@ -64,6 +66,15 @@ namespace Vs2026ChatProxy.VSIX.ToolWindows
         protected override void OnClose()
         {
             ThreadHelper.ThrowIfNotOnUIThread();
+
+            // 清理 MainControl：停止代理服务器、释放资源、取消事件订阅
+            if (_mainControl != null)
+            {
+                _ = _mainControl.CleanupAsync();
+                _mainControl.Dispose();
+                _mainControl = null;
+            }
+
             base.OnClose();
         }
 

@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
@@ -17,6 +18,9 @@ namespace Vs2026ChatProxy.Providers
         private readonly string _baseUrl;
         private readonly ProviderConfig _provider;
 
+        // 复用 HttpClient：按 Provider 身份缓存，避免 Socket 耗尽
+        private static readonly ConcurrentDictionary<string, HttpClient> _httpCache = new();
+
         public GeminiClient(ProviderConfig provider)
         {
             _provider = provider;
@@ -24,10 +28,13 @@ namespace Vs2026ChatProxy.Providers
             _baseUrl = (provider.BaseUrl ?? "https://generativelanguage.googleapis.com").TrimEnd('/');
         }
 
-        private HttpClient CreateHttpClient()
+        private HttpClient GetOrCreateHttpClient()
         {
-            var client = new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
-            return client;
+            var key = $"{_apiKey}:{_baseUrl}";
+            return _httpCache.GetOrAdd(key, _ =>
+            {
+                return new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
+            });
         }
 
         private object BuildBody(List<ChatMessage> messages, ChatOptions options)
@@ -63,7 +70,7 @@ namespace Vs2026ChatProxy.Providers
             var genConfig = new Dictionary<string, object>();
             if (options.Temperature != 0.7)
                 genConfig["temperature"] = options.Temperature;
-            if (options.MaxTokens != 4096)
+            if (options.MaxTokens > 0)
                 genConfig["maxOutputTokens"] = options.MaxTokens;
             if (genConfig.Count > 0)
                 body["generationConfig"] = genConfig;
@@ -98,7 +105,7 @@ namespace Vs2026ChatProxy.Providers
         public async Task<ChatResult> ChatAsync(
             List<ChatMessage> messages, ChatOptions options, CancellationToken ct = default)
         {
-            using var http = CreateHttpClient();
+            var http = GetOrCreateHttpClient();
             var url = BuildNonStreamUrl(options.Model);
             var body = BuildBody(messages, options);
             var json = JsonConvert.SerializeObject(body);
@@ -144,7 +151,7 @@ namespace Vs2026ChatProxy.Providers
             List<ChatMessage> messages, ChatOptions options,
             [EnumeratorCancellation] CancellationToken ct = default)
         {
-            using var http = CreateHttpClient();
+            var http = GetOrCreateHttpClient();
             var url = BuildStreamUrl(options.Model);
             var body = BuildBody(messages, options);
             var json = JsonConvert.SerializeObject(body);
