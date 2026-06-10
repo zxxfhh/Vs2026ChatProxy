@@ -362,6 +362,7 @@ namespace Vs2026ChatProxy.UI
             this.chkToggleAll.Size = new System.Drawing.Size(75, 28);
             this.chkToggleAll.TabIndex = 3;
             this.chkToggleAll.Text = "全选";
+            this.chkToggleAll.CheckedChanged += new System.EventHandler(this.chkToggleAll_CheckedChanged);
             // 
             // btnPanel
             // 

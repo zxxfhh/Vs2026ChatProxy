@@ -185,8 +185,15 @@ namespace Vs2026ChatProxy.UI
             if (!string.IsNullOrEmpty(apiKey))
                 http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
 
-            var resp = await http.GetStringAsync(url);
-            var jobj = JObject.Parse(resp);
+            using var resp = await http.GetAsync(url);
+            if (!resp.IsSuccessStatusCode)
+            {
+                var errBody = await resp.Content.ReadAsStringAsync();
+                throw new Exception($"HTTP {(int)resp.StatusCode}: {(errBody.Length > 200 ? errBody.Substring(0, 200) + "..." : errBody)}");
+            }
+
+            var respText = await resp.Content.ReadAsStringAsync();
+            var jobj = JObject.Parse(respText);
             var data = jobj["data"] as JArray;
             if (data == null) return [];
 
@@ -309,10 +316,11 @@ namespace Vs2026ChatProxy.UI
                 if (string.IsNullOrEmpty(modelId)) continue;
                 var mc = new ModelConfig
                 {
-                    Enabled = row.Cells[iEnabled].Value is bool b ? b : true,
+                    // DataGridViewCheckBoxColumn 的值可能是 bool、bool?、null、或 "true"/"false" 字符串
+                    Enabled = IsChecked(row.Cells[iEnabled]),
                     Id = modelId,
                     ContextTag = row.Cells[iContextTag].Value?.ToString()?.Trim() ?? "",
-                    AppendContextTag = row.Cells[iAppendTag].Value is bool a && a,
+                    AppendContextTag = IsChecked(row.Cells[iAppendTag]),
                 };
                 mc.SyncMaxContextFromTag();
                 Provider.Models.Add(mc);
@@ -365,6 +373,19 @@ namespace Vs2026ChatProxy.UI
                 if (!row.IsNewRow)
                     row.Cells[iEnabled].Value = value;
             }
+        }
+
+        /// <summary>安全地从 DataGridViewCheckBoxCell 读取勾选状态</summary>
+        private static bool IsChecked(DataGridViewCell cell)
+        {
+            var val = cell.Value;
+            if (val is bool b) return b;
+            if (val == null || val == DBNull.Value)
+            {
+                // 未设置过值时，根据列的 TrueValue/FalseValue 推断默认为 true
+                return true;
+            }
+            return val.ToString()?.Equals("true", StringComparison.OrdinalIgnoreCase) == true;
         }
     }
 }
