@@ -84,7 +84,27 @@ namespace Vs2026ChatProxy.Proxy
         private static string FixEscapeSequences(string json)
         {
             // 修复 Windows 路径中的反斜杠：未转义的 \C \J \P 等
+            // 但排除合法的 JSON 转义：\" \\ \/ \b \f \n \r \t \uXXXX
             return Regex.Replace(json, @"\\([^""\\\/bfnrtu])", @"\\$1");
+        }
+
+        /// <summary>
+        /// 清理路径值中的多余反斜杠。
+        /// AI 模型（特别是 GLM/DeepSeek）经常输出损坏的路径，如：
+        ///   "ZhjngkModel\\\\\\MEntity\\\\\\Inspection\\\\\\xxx.cs"
+        /// JSON 解析后变成多重反斜杠，必须清理为单斜杠。
+        /// </summary>
+        private static string CleanPathValue(string path)
+        {
+            if (string.IsNullOrEmpty(path)) return path;
+            // 将连续的反斜杠替换为单个正斜杠
+            var cleaned = Regex.Replace(path, @"\\{2,}", "/");
+            // 再将单个反斜杠也替换为正斜杠
+            cleaned = cleaned.Replace('\\', '/');
+            // 去除连续重复的正斜杠
+            while (cleaned.Contains("//"))
+                cleaned = cleaned.Replace("//", "/");
+            return cleaned;
         }
 
         /// <summary>尝试修复畸形 JSON</summary>
@@ -179,7 +199,7 @@ namespace Vs2026ChatProxy.Proxy
             return null;
         }
 
-        /// <summary>规范化路径类型字段（统一为正斜杠，去除重复斜杠）</summary>
+        /// <summary>规范化路径类型字段（清理多重反斜杠，统一为正斜杠）</summary>
         private static void NormalizePathFields(JObject parsed)
         {
             var pathFields = new[] { "path", "filePath", "filename", "dir", "directory", "folder" };
@@ -188,16 +208,7 @@ namespace Vs2026ChatProxy.Proxy
                 var token = parsed[field];
                 if (token?.Type == JTokenType.String)
                 {
-                    var val = token.ToString();
-                    if (val.Contains('\\'))
-                    {
-                        // 参考 CopilotProxy：无条件将反斜杠转为正斜杠
-                        val = val.Replace('\\', '/');
-                        // 去除连续重复斜杠
-                        while (val.Contains("//"))
-                            val = val.Replace("//", "/");
-                        parsed[field] = val;
-                    }
+                    parsed[field] = CleanPathValue(token.ToString());
                 }
             }
         }
@@ -235,7 +246,7 @@ namespace Vs2026ChatProxy.Proxy
                 // ── get_file：VS 期望 filename ──
                 case "get_file":
                     AliasTo(args, "filename", "filePath", "path", "uri", "resource");
-                    args["filename"] = FixPathEscapes(PickFirst(args, "filename") ?? "");
+                    args["filename"] = CleanPathValue(PickFirst(args, "filename") ?? "");
                     AliasTo(args, "startLine", "start_line", "fromLine", "line");
                     AliasTo(args, "endLine", "end_line", "toLine");
                     break;
@@ -243,7 +254,7 @@ namespace Vs2026ChatProxy.Proxy
                 // ── read_file：VS 期望 filePath ──
                 case "read_file":
                     AliasTo(args, "filePath", "filename", "path", "uri");
-                    args["filePath"] = FixPathEscapes(PickFirst(args, "filePath") ?? "");
+                    args["filePath"] = CleanPathValue(PickFirst(args, "filePath") ?? "");
                     AliasTo(args, "startLine", "start_line", "fromLine", "line");
                     AliasTo(args, "endLine", "end_line", "toLine");
                     break;
