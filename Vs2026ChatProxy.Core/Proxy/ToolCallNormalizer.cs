@@ -31,6 +31,12 @@ namespace Vs2026ChatProxy.Proxy
             // 空名字 → 丢弃
             if (string.IsNullOrEmpty(name)) return null;
 
+            // 0. 预处理：在 JSON 解析之前，暴力清理路径字段中的多重反斜杠
+            //    GLM 模型经常在 JSON 字符串值中输出 ZhjngkModel\\\\\\MEntity\\\\\\...
+            //    这些在 JSON 字面量中是合法的（\\\\ = \\），但解析后变成多重反斜杠。
+            //    直接在原始 JSON 文本层面替换：将 3 个及以上连续反斜杠替换为单个正斜杠。
+            rawArgs = Regex.Replace(rawArgs, @"\\{3,}", "/");
+
             // 1. 修复无效的 JSON 转义序列（如 \c \n 在非预期位置）
             rawArgs = FixEscapeSequences(rawArgs);
 
@@ -64,7 +70,6 @@ namespace Vs2026ChatProxy.Proxy
                 parsed = ToolSchemas.ApplyDefaults(name, parsed);
             }
 
-            // 6. 返回规范化结果
             return new ToolCall
             {
                 Id = string.IsNullOrEmpty(tc.Id) ? $"call_{Guid.NewGuid():N}" : tc.Id,

@@ -126,6 +126,7 @@ namespace Vs2026ChatProxy.UI
             this.cmbType.Name = "cmbType";
             this.cmbType.Size = new System.Drawing.Size(618, 25);
             this.cmbType.TabIndex = 1;
+            this.cmbType.SelectedIndexChanged += new System.EventHandler(this.cmbType_SelectedIndexChanged);
             // 
             // lblName
             // 
@@ -324,6 +325,7 @@ namespace Vs2026ChatProxy.UI
             this.btnAddModel.Size = new System.Drawing.Size(86, 28);
             this.btnAddModel.TabIndex = 0;
             this.btnAddModel.Text = "添加模型";
+            this.btnAddModel.Click += new System.EventHandler(this.btnAddModel_Click);
             // 
             // btnDelModel
             // 
@@ -334,6 +336,7 @@ namespace Vs2026ChatProxy.UI
             this.btnDelModel.Size = new System.Drawing.Size(86, 28);
             this.btnDelModel.TabIndex = 1;
             this.btnDelModel.Text = "删除选中";
+            this.btnDelModel.Click += new System.EventHandler(this.btnDelModel_Click);
             // 
             // btnFetchModels
             // 
@@ -349,6 +352,7 @@ namespace Vs2026ChatProxy.UI
             this.btnFetchModels.TabIndex = 2;
             this.btnFetchModels.Text = "🔄 获取模型";
             this.btnFetchModels.UseVisualStyleBackColor = false;
+            this.btnFetchModels.Click += new System.EventHandler(this.btnFetchModels_Click);
             // 
             // chkToggleAll
             // 
@@ -401,6 +405,7 @@ namespace Vs2026ChatProxy.UI
             this.btnSave.TabIndex = 1;
             this.btnSave.Text = "保存";
             this.btnSave.UseVisualStyleBackColor = false;
+            this.btnSave.Click += new System.EventHandler(this.btnSave_Click);
             // 
             // ProviderEditDialog
             // 

@@ -297,25 +297,43 @@ namespace Vs2026ChatProxy.Proxy
                     }
                 }
 
-                // 4. 输出规范化后的完整 tool calls（一次性输出，VS 不会收到残缺数据）
-                for (int i = 0; i < normalizedCalls.Count; i++)
+                // 4. 关键修复：如果规范化后 tool calls 为空，不应发送 tool_calls finish_reason
+                //    否则 VS 收到 finish_reason=tool_calls 但没有 tool_call 数据，会无限重试
+                if (normalizedCalls.Count > 0)
                 {
-                    var tc = normalizedCalls[i];
-                    onLog?.Invoke($"   🔧 tool_call[{i}]: {tc.Name}({(tc.Arguments?.Length > 200 ? tc.Arguments.Substring(0, 200) + "..." : tc.Arguments)})");
-                    await SseWriter.WriteEventAsync(body,
-                        SseWriter.CreateToolCallChunk(chunkId, displayModel, i,
-                            tc.Id, tc.Name, tc.Arguments ?? "{}"), ct);
+                    // 输出规范化后的完整 tool calls（一次性输出，VS 不会收到残缺数据）
+                    for (int i = 0; i < normalizedCalls.Count; i++)
+                    {
+                        var tc = normalizedCalls[i];
+                        onLog?.Invoke($"   🔧 tool_call[{i}]: {tc.Name}({(tc.Arguments?.Length > 200 ? tc.Arguments.Substring(0, 200) + "..." : tc.Arguments)})");
+                        await SseWriter.WriteEventAsync(body,
+                            SseWriter.CreateToolCallChunk(chunkId, displayModel, i,
+                                tc.Id, tc.Name, tc.Arguments ?? "{}"), ct);
+                        await SseWriter.FlushAsync(body, ct);
+                    }
+
+                    // finish_reason = "tool_calls"
+                    onLog?.Invoke($"   🏁 finish_reason: stop → tool_calls ({normalizedCalls.Count} tool calls)");
+                    await SseWriter.WriteEventAsync(body, SseWriter.CreateFinishChunk(chunkId, displayModel, "tool_calls"), ct);
                     await SseWriter.FlushAsync(body, ct);
                 }
-
-                // 5. finish_reason = "tool_calls"
-                onLog?.Invoke($"   🏁 finish_reason: stop → tool_calls ({normalizedCalls.Count} tool calls)");
-                await SseWriter.WriteEventAsync(body, SseWriter.CreateFinishChunk(chunkId, displayModel, "tool_calls"), ct);
-                await SseWriter.FlushAsync(body, ct);
+                else
+                {
+                    // 规范化后为空 → 当作普通 stop 处理
+                    // hasToolCalls=true 时文本没输出过，补发
+                    if (fullContent.Length > 0)
+                    {
+                        await SseWriter.WriteEventAsync(body, SseWriter.CreateContentChunk(chunkId, displayModel, fullContent.ToString()), ct);
+                        await SseWriter.FlushAsync(body, ct);
+                    }
+                    onLog?.Invoke($"   ⚠️ tool_calls 规范化后为空，回退为 stop");
+                    await SseWriter.WriteEventAsync(body, SseWriter.CreateFinishChunk(chunkId, displayModel, "stop"), ct);
+                    await SseWriter.FlushAsync(body, ct);
+                }
             }
             else
             {
-                // 没有工具调用 → 正常结束
+                // 没有结构化 tool call → 先尝试从文本提取
                 // 如果有累积文本但没检测到结构化 tool call，尝试从文本提取
                 if (fullContent.Length > 0)
                 {
@@ -345,6 +363,11 @@ namespace Vs2026ChatProxy.Proxy
                 }
                 else
                 {
+                    // 完全没有内容也没有 tool calls → 模型返回空响应
+                    // VS 对空 assistant 回应会重试，我们加个空白内容避免触发重试
+                    onLog?.Invoke($"   ⚠️ 模型返回空响应（无内容无工具调用），输出空白占位");
+                    await SseWriter.WriteEventAsync(body, SseWriter.CreateContentChunk(chunkId, displayModel, " "), ct);
+                    await SseWriter.FlushAsync(body, ct);
                     await SseWriter.WriteEventAsync(body, SseWriter.CreateFinishChunk(chunkId, displayModel, "stop"), ct);
                     await SseWriter.FlushAsync(body, ct);
                 }
