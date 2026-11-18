@@ -35,11 +35,18 @@
 | `vschatproxy.executablePath` | 空 | `Vs2026ChatProxy.exe` 路径 |
 | `vschatproxy.autoStart` | `false` | 启动 VS Code 时自动拉起代理 |
 
+## 一键安装 / 卸载
+
+本目录直接双击：
+
+- `install.bat` —— 自动定位 VS Code CLI，安装目录内最新的 `.vsix`（不挑版本号，同版本可覆盖）
+- `uninstall.bat` —— 卸载扩展（`zxxfhh.vs2026-chat-proxy`）
+
 ## 从源码打包
 
 ```bash
 npm install
 npm run compile
 npx vsce package
-# 在 VS Code 中: Extensions → ... → Install from VSIX
+# 然后运行 install.bat，或在 VS Code 中: Extensions → ... → Install from VSIX
 ```
