@@ -1,0 +1,38 @@
+name: Publish Marketplace
+
+# 手动触发：发布 VS Code 插件到 Marketplace（及可选的 Open VSX）。
+# 前置条件（仓库 Settings → Secrets and variables → Actions）：
+#   VSCE_PAT —— Azure DevOps PAT（Scope: Marketplace → Manage），publisher 需先在
+#               https://marketplace.visualstudio.com/manage 注册为 zxxfhh
+#   OVSX_PAT —— （可选）Open VSX 令牌，https://open-vsx.org 设置页生成
+
+on:
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Package
+        working-directory: vscode-extension
+        run: |
+          npm ci
+          npm run compile
+          npx vsce package --allow-missing-repository
+
+      - name: Publish to VS Code Marketplace
+        working-directory: vscode-extension
+        run: npx vsce publish --allow-missing-repository -p ${{ secrets.VSCE_PAT }}
+
+      - name: Publish to Open VSX (optional)
+        if: ${{ secrets.OVSX_PAT != '' }}
+        working-directory: vscode-extension
+        run: |
+          npm install -g ovsx
+          ovsx publish --pat ${{ secrets.OVSX_PAT }}

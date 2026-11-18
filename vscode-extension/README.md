@@ -48,3 +48,11 @@ npm run compile
 npx vsce package
 # 然后运行 plugins\vscode\install.bat，或在 VS Code 中: Extensions → ... → Install from VSIX
 ```
+
+## 安装渠道
+
+| 渠道 | 方式 |
+|---|---|
+| VS Code Marketplace | 上架后：扩展面板搜索 `VsChatProxy`，或 `code --install-extension zxxfhh.vs2026-chat-proxy`（原生自动更新） |
+| GitHub Release（免账号） | `plugins\vscode\install.bat`，或一行命令见主 README「网络一键安装」 |
+| 离线 | 下载 Release 中的 `VsCodeCopilotProxy.vsix` → Extensions → Install from VSIX |

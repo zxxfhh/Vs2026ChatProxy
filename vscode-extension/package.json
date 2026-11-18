@@ -5,6 +5,7 @@
   "version": "0.2.0",
   "publisher": "zxxfhh",
   "license": "MIT",
+  "icon": "icon.png",
   "repository": {
     "type": "git",
     "url": "https://github.com/zxxfhh/Vs2026ChatProxy.git"
