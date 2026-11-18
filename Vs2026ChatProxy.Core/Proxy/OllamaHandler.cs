@@ -49,6 +49,11 @@ namespace Vs2026ChatProxy.Proxy
             var toolsArray = req["tools"] as JArray;
             var toolCount = toolsArray?.Count ?? 0;
 
+            // 提取工作区根路径（与 OpenAI 通道共用），用于工具调用参数的相对路径补全
+            var workspaceRoot = ToolCallNormalizer.ExtractWorkspaceRoot(messages);
+            if (!string.IsNullOrEmpty(workspaceRoot))
+                onLog?.Invoke($"   📂 [Ollama] workspaceRoot: {workspaceRoot}");
+
             // Ollama 特有: options 字段（temperature 等参数）
             var options = req["options"] as JObject;
 
@@ -152,9 +157,9 @@ namespace Vs2026ChatProxy.Proxy
                 }
 
                 if (useStream)
-                    await HandleOllamaStreamAsync(responseBody, client, chatMessages, chatOptions, reqModel, stopwatch, onLog, ct);
+                    await HandleOllamaStreamAsync(responseBody, client, chatMessages, chatOptions, reqModel, stopwatch, onLog, ct, workspaceRoot);
                 else
-                    await HandleOllamaNonStreamAsync(responseBody, client, chatMessages, chatOptions, reqModel, stopwatch, onLog, ct);
+                    await HandleOllamaNonStreamAsync(responseBody, client, chatMessages, chatOptions, reqModel, stopwatch, onLog, ct, workspaceRoot);
             }
             catch (HttpListenerException ex)
             {
@@ -171,7 +176,7 @@ namespace Vs2026ChatProxy.Proxy
         // ── Ollama 流式响应（NDJSON）─────────────────────────────
         private static async Task HandleOllamaStreamAsync(Stream body, IChatClient client,
             List<ChatMessage> messages, ChatOptions options, string displayModel,
-            Stopwatch stopwatch, Action<string>? onLog, CancellationToken ct)
+            Stopwatch stopwatch, Action<string>? onLog, CancellationToken ct, string? workspaceRoot = null)
         {
             var totalChars = 0;
             var allToolCalls = new List<ToolCall>();
@@ -267,7 +272,8 @@ namespace Vs2026ChatProxy.Proxy
                     finishReason = chunk.FinishReason;
             }
 
-            // 合并累积的 tool calls
+            // 合并累积的 tool calls，并走与 OpenAI 通道相同的规范化管道
+            // （路径清理/别名映射/相对路径补全/默认值填充）
             foreach (var kvp in activeToolCalls.OrderBy(k => k.Key))
             {
                 allToolCalls.Add(new ToolCall
@@ -277,9 +283,27 @@ namespace Vs2026ChatProxy.Proxy
                     Arguments = kvp.Value.args.ToString()
                 });
             }
+            if (allToolCalls.Count > 0)
+            {
+                allToolCalls = ToolCallNormalizer.NormalizeAll(allToolCalls, workspaceRoot);
+                onLog?.Invoke($"   🔧 [Ollama] 工具调用规范化: {activeToolCalls.Count} → {allToolCalls.Count}");
+            }
 
             var hasToolCalls = allToolCalls.Count > 0;
             var doneReason = hasToolCalls ? "tool_calls" : (finishReason ?? "stop");
+
+            // 空响应保护：无文本也无工具调用时补一个空格块，
+            // 避免 VS 客户端把空 assistant 响应当异常而无限重试（与 ChatHandler 一致）
+            if (totalChars == 0 && !hasToolCalls)
+            {
+                await WriteNdjsonAsync(body, new
+                {
+                    model = displayModel,
+                    created_at = createdAt,
+                    message = new { role = "assistant", content = " " },
+                    done = false
+                }, ct);
+            }
 
             onLog?.Invoke($"   🏁 [Ollama] done_reason: {doneReason}");
 
@@ -339,13 +363,21 @@ namespace Vs2026ChatProxy.Proxy
         // ── Ollama 非流式响应（单行 NDJSON）──────────────────────
         private static async Task HandleOllamaNonStreamAsync(Stream body, IChatClient client,
             List<ChatMessage> messages, ChatOptions options, string displayModel,
-            Stopwatch stopwatch, Action<string>? onLog, CancellationToken ct)
+            Stopwatch stopwatch, Action<string>? onLog, CancellationToken ct, string? workspaceRoot = null)
         {
             var result = await client.ChatAsync(messages, options, ct);
             var duration = stopwatch.ElapsedMilliseconds;
             var createdAt = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffZ");
 
-            var hasToolCalls = result.ToolCalls.Count > 0;
+            // 工具调用规范化（与流式/OpenAI 通道一致）
+            var normalizedToolCalls = result.ToolCalls;
+            if (normalizedToolCalls.Count > 0)
+            {
+                normalizedToolCalls = ToolCallNormalizer.NormalizeAll(normalizedToolCalls, workspaceRoot);
+                onLog?.Invoke($"   🔧 [Ollama] 工具调用规范化: {result.ToolCalls.Count} → {normalizedToolCalls.Count}");
+            }
+
+            var hasToolCalls = normalizedToolCalls.Count > 0;
             var doneReason = hasToolCalls ? "tool_calls" : (result.FinishReason ?? "stop");
 
             // 构建 Ollama 响应的 message 对象
@@ -357,7 +389,7 @@ namespace Vs2026ChatProxy.Proxy
 
             if (hasToolCalls)
             {
-                msgObj["tool_calls"] = result.ToolCalls.Select(tc =>
+                msgObj["tool_calls"] = normalizedToolCalls.Select(tc =>
                 {
                     object argsObj;
                     try { argsObj = JsonConvert.DeserializeObject(tc.Arguments) ?? new { }; }

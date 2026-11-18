@@ -379,13 +379,13 @@ namespace Vs2026ChatProxy.UI
             var port = ConfigManager.Instance.Config.Port;
             var host = ConfigManager.Instance.Config.Host;
             var guideText =
-                "VS 2026 Copilot Chat 接入步骤：\r\n" +
+                "VS 2026 / VS Code 接入步骤：\r\n" +
                 "\r\n" +
                 "━━━ 第一步：配置供应商 ━━━\r\n" +
                 "\r\n" +
                 "1. 点击「➕ 添加」按钮\r\n" +
                 "2. 填写供应商信息（类型、名称、Base URL、API Key）\r\n" +
-                "3. 添加至少一个模型\r\n" +
+                "3. 添加至少一个模型（可选填上下文标签，如 [128K]）\r\n" +
                 "4. 点击保存\r\n" +
                 "\r\n" +
                 "━━━ 第二步：启动代理 ━━━\r\n" +
@@ -393,21 +393,42 @@ namespace Vs2026ChatProxy.UI
                 "点击底部「启动代理」按钮\r\n" +
                 $"代理将在 http://{host}:{port} 监听\r\n" +
                 "\r\n" +
-                "━━━ 第三步：VS 2026 设置 ━━━\r\n" +
+                "━━━ 第三步 A：VS 2026（18.10+ 新版）━━━\r\n" +
                 "\r\n" +
-                "1. 打开 VS 2026\r\n" +
-                "2. Tools → Options → GitHub → Copilot Chat\r\n" +
-                "3. 点击「Add Custom Model」\r\n" +
-                "4. 类型选择 Ollama\r\n" +
-                $"5. URL 填写：http://{host}:{port}\r\n" +
-                "6. API Key 留空\r\n" +
-                "7. 模型名称格式：{供应商名称}:{模型ID}\r\n" +
+                "18.10 起 BYOK 替换了旧 Ask/Agent 体验，入口在 Chat 内：\r\n" +
+                "\r\n" +
+                "1. 打开 Chat 窗口 → 顶部模型选择器\r\n" +
+                "2. 点击「Add a model / Manage Models」\r\n" +
+                "3. 方式一（推荐）：连接「Ollama 自定义端点」\r\n" +
+                $"   服务地址填：http://{host}:{port}\r\n" +
+                "   模型列表自动出现，选择完整 ID（供应商:模型 格式）\r\n" +
+                "4. 方式二：连接「OpenAI 自定义端点」（Chat Completions）\r\n" +
+                $"   基地址填：http://{host}:{port}/v1\r\n" +
+                "   从模型列表选择（或手动粘贴完整 ID）\r\n" +
+                "5. 添加后进入 Agent (Preview) 即可使用\r\n" +
+                "\r\n" +
+                "提示：字段名称以当前 VS 界面为准；\r\n" +
+                "不要把 VS Code 的 JSON 配置粘贴进 Visual Studio。\r\n" +
+                "\r\n" +
+                "━━━ 第三步 B：旧版 VS（17.x / 18.10 前）━━━\r\n" +
+                "\r\n" +
+                "Tools → Options → GitHub → Copilot Chat →\r\n" +
+                "「Add Custom Model」→ 类型 Ollama\r\n" +
+                $"URL 填：http://{host}:{port}，API Key 留空\r\n" +
+                "模型名称格式：{供应商名称}:{模型ID}\r\n" +
+                "\r\n" +
+                "━━━ 第三步 C：VS Code ━━━\r\n" +
+                "\r\n" +
+                "命令面板执行 Chat: Manage Language Models →\r\n" +
+                "Add Models → Custom Endpoint → Chat Completions\r\n" +
+                $"基地址填：http://{host}:{port}/v1\r\n" +
+                "或安装本项目的 VS Code 插件一键配置（见 README）\r\n" +
                 "\r\n" +
                 "━━━ 示例 ━━━\r\n" +
                 "\r\n" +
                 "供应商名称: my-anthropic\r\n" +
                 "模型 ID: claude-sonnet-4-20250514\r\n" +
-                "→ 模型名称填：my-anthropic:claude-sonnet-4-20250514\r\n" +
+                "→ 模型完整 ID：my-anthropic:claude-sonnet-4-20250514\r\n" +
                 "\r\n" +
                 "━━━ 支持的供应商 ━━━\r\n" +
                 "\r\n" +
@@ -417,8 +438,8 @@ namespace Vs2026ChatProxy.UI
 
             using var dlg = new Form
             {
-                Text = "📋 VS 2026 配置指南",
-                Size = new Size(520, 560),
+                Text = "📋 VS 2026 / VS Code 配置指南",
+                Size = new Size(560, 700),
                 StartPosition = FormStartPosition.CenterParent,
                 MaximizeBox = false,
                 MinimizeBox = false,

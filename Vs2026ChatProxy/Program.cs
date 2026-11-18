@@ -1,6 +1,10 @@
 using System;
 using System.IO;
+using System.Text;
+using System.Threading;
 using System.Windows.Forms;
+using Vs2026ChatProxy.Config;
+using Vs2026ChatProxy.Proxy;
 using Vs2026ChatProxy.UI;
 
 namespace Vs2026ChatProxy
@@ -30,7 +34,66 @@ namespace Vs2026ChatProxy
             if (!File.Exists(configPath) && File.Exists("proxy-config.example.json"))
                 File.Copy("proxy-config.example.json", configPath);
 
+            // --headless：无窗口后台模式（供 VS Code 插件等外部宿主拉起）
+            if (HasArg(args, "--headless"))
+            {
+                RunHeadless(configPath);
+                return;
+            }
+
             Application.Run(new MainForm(configPath));
+        }
+
+        private static bool HasArg(string[] args, string name)
+        {
+            foreach (var a in args)
+                if (string.Equals(a, name, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            return false;
+        }
+
+        /// <summary>
+        /// 后台模式：直接启动代理服务，不显示窗口。
+        /// 日志写入配置文件同目录（与 UI 模式相同的 proxy_*.log 约定）。
+        /// 进程由外部宿主管理生命周期（直接结束进程即可停止）。
+        /// </summary>
+        private static void RunHeadless(string configPath)
+        {
+            var configDir = Path.GetDirectoryName(Path.GetFullPath(configPath));
+            if (string.IsNullOrEmpty(configDir)) configDir = AppContext.BaseDirectory;
+            var logPath = Path.Combine(configDir, $"proxy_{DateTime.Now:yyyyMMdd_HHmmss}.log");
+            using var logWriter = new StreamWriter(logPath, append: true, Encoding.UTF8) { AutoFlush = true };
+
+            void Log(string msg)
+            {
+                try { logWriter.WriteLine($"{DateTime.Now:HH:mm:ss} {msg}"); } catch { }
+            }
+
+            try
+            {
+                ConfigManager.Instance.Load(configPath);
+                var config = ConfigManager.Instance.Config;
+                Log($"📂 [headless] 配置: {Path.GetFullPath(configPath)}");
+
+                var server = new ProxyServer();
+                server.OnLog += Log;
+                server.StartAsync(config).GetAwaiter().GetResult();
+
+                Log("✅ [headless] 代理已启动，等待请求（结束本进程即停止）");
+
+                // 阻塞直到进程被终止
+                using var mre = new ManualResetEvent(false);
+                Console.CancelKeyPress += (_, e) => { e.Cancel = true; mre.Set(); };
+                AppDomain.CurrentDomain.ProcessExit += (_, _) => mre.Set();
+                mre.WaitOne();
+
+                server.StopAsync().GetAwaiter().GetResult();
+            }
+            catch (Exception ex)
+            {
+                Log($"❌ [headless] 启动失败: {ex.Message}");
+                Environment.ExitCode = 1;
+            }
         }
     }
 }

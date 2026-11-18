@@ -96,22 +96,8 @@ namespace Vs2026ChatProxy.Proxy
             var messages = ConvertMessages(req["messages"] as JArray);
 
             // 提取工作区根路径（用于将相对路径补全为绝对路径）
-            // 直接从请求消息文本中提取，兼容多种格式
-            string? workspaceRoot = null;
-            if (req["messages"] is JArray msgArr)
-            {
-                foreach (var m in msgArr)
-                {
-                    var c = m["content"]?.ToString() ?? "";
-                    if (string.IsNullOrEmpty(c)) continue;
-                    // 格式1: "workspace root path is:\nI:\xxx\"
-                    var m1 = Regex.Match(c, @"workspace\s+root\s+path\s+is:\s*([\r\n]+)?([A-Za-z]:[\\/][^\s\r\n""']+)", RegexOptions.IgnoreCase);
-                    if (m1.Success) { workspaceRoot = m1.Groups[2].Value.TrimEnd('\\', '/'); break; }
-                    // 格式2: "workspaceRoot:I:\xxx" 或 "workspace_root: I:\xxx"
-                    var m2 = Regex.Match(c, @"(?:workspace[_-]?root|workspaceRoot|project[_-]?path)[:\s]+([A-Za-z]:[\\/][^\s\r\n""']+)", RegexOptions.IgnoreCase);
-                    if (m2.Success) { workspaceRoot = m2.Groups[1].Value.TrimEnd('\\', '/'); break; }
-                }
-            }
+            // 直接从请求消息文本中提取，兼容多种格式（与 Ollama 通道共用）
+            var workspaceRoot = ToolCallNormalizer.ExtractWorkspaceRoot(req["messages"] as JArray);
             if (!string.IsNullOrEmpty(workspaceRoot))
                 onLog?.Invoke($"   📂 workspaceRoot: {workspaceRoot}");
 

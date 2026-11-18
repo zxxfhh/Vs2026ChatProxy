@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using Vs2026ChatProxy.Config;
 
 namespace Vs2026ChatProxy.Proxy
@@ -12,6 +13,9 @@ namespace Vs2026ChatProxy.Proxy
     /// </summary>
     public class ProxyServer
     {
+        /// <summary>代理自身版本（/api/version 返回值）</summary>
+        public const string ProxyVersion = "1.1.0";
+
         private HttpListener? _listener;
         private CancellationTokenSource? _cts;
         private bool _running;
@@ -55,7 +59,8 @@ namespace Vs2026ChatProxy.Proxy
                 Log($"   POST http://{Host}:{Port}/v1/chat/completions  (OpenAI SSE)");
                 Log($"   POST http://{Host}:{Port}/api/chat            (Ollama NDJSON)");
                 Log($"   POST http://{Host}:{Port}/v1/compact");
-                Log($"   GET  http://{Host}:{Port}/v1/models");
+                Log($"   GET  http://{Host}:{Port}/v1/models           (含 model_info 元数据)");
+                Log($"   GET/POST http://{Host}:{Port}/api/tags|ps|show|version  (Ollama 兼容)");
                 Log($"   GET  http://{Host}:{Port}/health");
 
                 // 开始处理请求
@@ -166,6 +171,10 @@ namespace Vs2026ChatProxy.Proxy
 
                 switch (path, method)
                 {
+                    case ("/", "GET"):
+                        await WriteJsonAsync(res, new { service = "Vs2026ChatProxy", status = "running" });
+                        break;
+
                     case ("/health", "GET"):
                         await WriteJsonAsync(res, new { status = "ok", providers = config.Providers.Count });
                         break;
@@ -199,7 +208,7 @@ namespace Vs2026ChatProxy.Proxy
                         await CompactHandler.HandleAsync(req.InputStream, res, config, config.CompactThresholdPercent, ct);
                         break;
 
-                    // ── Ollama 兼容端点（stub，让 VS 2026 不报错）──
+                    // ── Ollama 兼容端点（VS 2026 BYOK / VS Code 会查询）──
 
                     case ("/api/tags", "GET"):
                     case ("/api/list", "GET"):
@@ -209,12 +218,17 @@ namespace Vs2026ChatProxy.Proxy
                         break;
 
                     case ("/api/show", "POST"):
-                        // Ollama 模型详情（stub）
-                        await WriteJsonAsync(res, new { modelfile = "", parameters = "", template = "" });
+                        // Ollama 模型详情：VS Code Copilot 只读 model_info[general.architecture + ".context_length"]
+                        await HandleOllamaShowAsync(req, res, config);
+                        break;
+
+                    case ("/api/ps", "GET"):
+                        // Ollama 已加载模型列表（客户端探测端点，本地网关无加载态，返回空表）
+                        await WriteJsonAsync(res, new { models = new object[0] });
                         break;
 
                     case ("/api/version", "GET"):
-                        await WriteJsonAsync(res, new { version = "0.5.7" });
+                        await WriteJsonAsync(res, new { version = ProxyVersion });
                         break;
 
                     case ("/api/embeddings", "POST"):
@@ -261,6 +275,47 @@ namespace Vs2026ChatProxy.Proxy
             var bytes = Encoding.UTF8.GetBytes(json);
             await res.OutputStream.WriteAsync(bytes);
             await res.OutputStream.FlushAsync();
+        }
+
+        /// <summary>
+        /// 处理 POST /api/show：返回指定模型的 Ollama 详情。
+        /// VS Code Copilot 通过 model_info[general.architecture + ".context_length"] 读取上下文长度；
+        /// 未知模型返回 404，不做伪造。
+        /// </summary>
+        private static async Task HandleOllamaShowAsync(HttpListenerRequest req, HttpListenerResponse res, ProxyConfig config)
+        {
+            string? modelName = null;
+            try
+            {
+                using var reader = new StreamReader(req.InputStream, Encoding.UTF8);
+                var bodyJson = JsonConvert.DeserializeObject(await reader.ReadToEndAsync()) as JObject;
+                modelName = (bodyJson?["model"] ?? bodyJson?["name"])?.ToString();
+            }
+            catch { /* body 解析失败按未指定处理 */ }
+
+            if (!string.IsNullOrWhiteSpace(modelName))
+            {
+                try
+                {
+                    var (providerName, modelId) = ModelEncoding.Decode(modelName);
+                    var provider = config.Providers.FirstOrDefault(p => p.Name == providerName);
+                    var model = provider?.FindModel(modelId);
+                    if (provider != null && model != null)
+                    {
+                        await WriteJsonAsync(res, new
+                        {
+                            capabilities = new[] { "completion", "tools" },
+                            model_info = ModelsHandler.BuildModelInfo(provider, model),
+                            details = new { family = provider.Type },
+                        });
+                        return;
+                    }
+                }
+                catch (ArgumentException) { /* 编码格式不合法，按未找到处理 */ }
+            }
+
+            res.StatusCode = 404;
+            await WriteJsonAsync(res, new { error = new { code = 404, message = $"model not found: \"{modelName ?? ""}\"" } });
         }
 
         /// <summary>

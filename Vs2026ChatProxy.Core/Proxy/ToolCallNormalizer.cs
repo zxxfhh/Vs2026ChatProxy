@@ -564,6 +564,30 @@ namespace Vs2026ChatProxy.Proxy
         // ── VS 上下文提取 ────────────────────────────────────
 
         /// <summary>
+        /// 从原始请求 messages（JArray）中提取工作区根路径。
+        /// ChatHandler（OpenAI 通道）与 OllamaHandler 共用。
+        /// 匹配 VS Copilot 常见的两种注入格式：
+        /// 1. "workspace root path is:\nX:\xxx\"
+        /// 2. "workspaceRoot: X:\xxx" / "project path: X:\xxx"
+        /// </summary>
+        public static string? ExtractWorkspaceRoot(JArray? messages)
+        {
+            if (messages == null) return null;
+            foreach (var m in messages)
+            {
+                var c = m?["content"]?.ToString();
+                if (string.IsNullOrEmpty(c)) continue;
+                // 格式1: "workspace root path is:\nI:\xxx\"
+                var m1 = Regex.Match(c, @"workspace\s+root\s+path\s+is:\s*([\r\n]+)?([A-Za-z]:[\\/][^\s\r\n""']+)", RegexOptions.IgnoreCase);
+                if (m1.Success) return m1.Groups[2].Value.TrimEnd('\\', '/');
+                // 格式2: "workspaceRoot:I:\xxx" 或 "workspace_root: I:\xxx" / "project path: I:\xxx"
+                var m2 = Regex.Match(c, @"(?:workspace[_-]?root|workspaceRoot|project[_-]?path)[:\s]+([A-Za-z]:[\\/][^\s\r\n""']+)", RegexOptions.IgnoreCase);
+                if (m2.Success) return m2.Groups[1].Value.TrimEnd('\\', '/');
+            }
+            return null;
+        }
+
+        /// <summary>
         /// 从消息中提取 VS 工作区上下文。
         /// 参考 CopilotProxy 的 extractVSContext。
         /// </summary>

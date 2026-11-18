@@ -1,0 +1,112 @@
+{
+  "name": "vs2026-chat-proxy",
+  "displayName": "VsChatProxy — 自定义模型代理",
+  "description": "管理 Vs2026ChatProxy 本地代理：状态监控、后台启动、一键配置 VS Code 聊天模型（Custom Endpoint）",
+  "version": "0.1.0",
+  "publisher": "zxxfhh",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/zxxfhh/Vs2026ChatProxy.git"
+  },
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Chat",
+    "Other"
+  ],
+  "activationEvents": [],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "vschatproxy.start",
+        "title": "启动代理",
+        "category": "VsChatProxy"
+      },
+      {
+        "command": "vschatproxy.stop",
+        "title": "停止代理",
+        "category": "VsChatProxy"
+      },
+      {
+        "command": "vschatproxy.configureChatModels",
+        "title": "配置 VS Code 聊天模型",
+        "category": "VsChatProxy"
+      },
+      {
+        "command": "vschatproxy.showModels",
+        "title": "查看模型列表",
+        "category": "VsChatProxy"
+      },
+      {
+        "command": "vschatproxy.refreshModels",
+        "title": "刷新模型列表",
+        "category": "VsChatProxy",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "vschatproxy.openConfig",
+        "title": "打开配置文件",
+        "category": "VsChatProxy"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "vschatproxy",
+          "title": "VsChatProxy",
+          "icon": "$(plug)"
+        }
+      ]
+    },
+    "views": {
+      "vschatproxy": [
+        {
+          "id": "vschatproxy.models",
+          "name": "模型列表"
+        }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "vschatproxy.refreshModels",
+          "when": "view == vschatproxy.models",
+          "group": "navigation"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "VsChatProxy",
+      "properties": {
+        "vschatproxy.baseUrl": {
+          "type": "string",
+          "default": "http://127.0.0.1:58080",
+          "description": "代理服务地址（不含 /v1 后缀）"
+        },
+        "vschatproxy.executablePath": {
+          "type": "string",
+          "default": "",
+          "description": "Vs2026ChatProxy.exe 独立程序路径（「启动代理」命令需要）"
+        },
+        "vschatproxy.autoStart": {
+          "type": "boolean",
+          "default": false,
+          "description": "VS Code 启动时代理未运行则自动拉起（需要配置 executablePath）"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@types/vscode": "^1.90.0",
+    "typescript": "^5.4.0"
+  }
+}
