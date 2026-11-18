@@ -1,0 +1,54 @@
+name: Release
+
+# 推送 v* 标签时触发：构建两个插件包 + 独立 exe，创建 GitHub Release 并附带产物
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # ── 构建 Visual Studio VSIX + 独立 exe（net48，需 VS 的 MSBuild）──
+      - uses: microsoft/setup-msbuild@v2
+      - name: Build solution (Release)
+        run: msbuild Vs2026ChatProxy.sln /p:Configuration=Release /restore /m /v:m
+
+      # ── 构建 VS Code 插件 vsix ──
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Package VS Code extension
+        working-directory: vscode-extension
+        run: |
+          npm ci
+          npm run compile
+          npx vsce package --allow-missing-repository
+
+      # ── 独立 exe 打包（VS Code 插件后台拉起代理用）──
+      - name: Zip standalone exe
+        shell: pwsh
+        run: |
+          Compress-Archive -Path Vs2026ChatProxy/bin/Release/net48/* -DestinationPath Vs2026ChatProxy-exe-win.zip -Force
+
+      # ── 同步插件副本到 plugins/ 目录（Release 附带，供离线分发）──
+      - name: Sync plugins folder
+        shell: pwsh
+        run: |
+          Copy-Item "Vs2026ChatProxy.VSIX/bin/Release/VsCopilotProxy.vsix" "plugins/vs2026/" -Force
+          Copy-Item "vscode-extension/vs2026-chat-proxy-*.vsix" "plugins/vscode/" -Force
+
+      # ── 创建 Release 并附产物 ──
+      - uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            Vs2026ChatProxy.VSIX/bin/Release/VsCopilotProxy.vsix
+            Vs2026ChatProxy-exe-win.zip
+            vscode-extension/vs2026-chat-proxy-*.vsix
