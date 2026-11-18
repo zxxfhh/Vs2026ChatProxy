@@ -5,6 +5,9 @@
     <VSToolsPath Condition="'$(VSToolsPath)' == ''">$(MSBuildExtensionsPath32)\Microsoft\VisualStudio\v$(VisualStudioVersion)</VSToolsPath>
     <!-- VS 18 MSBuild 的 NuGet restore 要求显式声明 RID -->
     <RuntimeIdentifiers>win</RuntimeIdentifiers>
+    <!-- Release 构建不自动部署到 Exp 实验实例（手工安装用 Release vsix；
+         Debug 保持自动部署以支持 F5 调试） -->
+    <DeployExtension Condition="'$(Configuration)' == 'Release'">false</DeployExtension>
   </PropertyGroup>
   <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
   <PropertyGroup>
