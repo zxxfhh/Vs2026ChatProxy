@@ -39,7 +39,7 @@ MSBuild Vs2026ChatProxy.sln /p:Configuration=Release
 
 ### 3. 启动代理
 
-点击「启动代理」。默认监听 `http://127.0.0.1:58080`（可在界面修改端口）。
+点击「启动代理」。默认监听 `http://127.0.0.1:11434`（可在界面修改端口）。
 
 ---
 
@@ -50,8 +50,8 @@ MSBuild Vs2026ChatProxy.sln /p:Configuration=Release
 1. 打开 Chat 窗口 → 顶部**模型选择器**
 2. 点击 **Add a model / Manage Models**
 3. 二选一：
-   - **Ollama 自定义端点**：服务地址 `http://127.0.0.1:58080`（不带 `/v1`），模型列表自动出现
-   - **OpenAI 自定义端点**（Chat Completions）：基地址 `http://127.0.0.1:58080/v1`
+   - **Ollama 自定义端点**：服务地址 `http://127.0.0.1:11434`（不带 `/v1`），模型列表自动出现
+   - **OpenAI 自定义端点**（Chat Completions）：基地址 `http://127.0.0.1:11434/v1`
 4. 从列表选择完整模型 ID（格式 `供应商名:模型ID`，如 `my-anthropic:claude-sonnet-4-20250514`）
 5. 进入 Agent (Preview) 使用
 
@@ -65,7 +65,7 @@ MSBuild Vs2026ChatProxy.sln /p:Configuration=Release
 方式二（手动）：
 
 1. 命令面板 → `Chat: Manage Language Models` → **Add Models → Custom Endpoint → Chat Completions**
-2. 基地址填 `http://127.0.0.1:58080/v1`
+2. 基地址填 `http://127.0.0.1:11434/v1`
 
 或直接编辑 `chatLanguageModels.json`（Windows: `%APPDATA%\Code\User\`）：
 
@@ -75,7 +75,7 @@ MSBuild Vs2026ChatProxy.sln /p:Configuration=Release
     "name": "VsChatProxy",
     "vendor": "customendpoint",
     "apiType": "chat-completions",
-    "url": "http://127.0.0.1:58080/v1"
+    "url": "http://127.0.0.1:11434/v1"
   }
 ]
 ```
@@ -110,7 +110,7 @@ npx vsce package    # 产出 .vsix，VS Code 中 "Install from VSIX" 安装
 
 | 设置 | 默认值 | 说明 |
 |---|---|---|
-| `vschatproxy.baseUrl` | `http://127.0.0.1:58080` | 代理地址 |
+| `vschatproxy.baseUrl` | `http://127.0.0.1:11434` | 代理地址 |
 | `vschatproxy.executablePath` | （空） | 独立 exe 路径（启动代理用） |
 | `vschatproxy.autoStart` | `false` | VS Code 启动时自动拉起代理 |
 
@@ -153,7 +153,7 @@ Vs2026ChatProxy.exe [--config <路径>] [--headless]
 
 ```json
 {
-  "port": 58080,
+  "port": 11434,
   "host": "127.0.0.1",
   "compactThresholdPercent": 85,
   "defaultModel": "",

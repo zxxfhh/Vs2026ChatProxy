@@ -13,7 +13,7 @@
 ## 使用
 
 1. 先用独立 exe（或 VS 2026 VSIX）配置好供应商，或让插件生成模板后编辑
-2. 设置 `vschatproxy.baseUrl`（默认 `http://127.0.0.1:58080`）
+2. 设置 `vschatproxy.baseUrl`（默认 `http://127.0.0.1:11434`）
 3. 执行命令 `VsChatProxy: 配置 VS Code 聊天模型`
 4. 在 Chat 的模型选择器中选择 `VsChatProxy` 供应商下的模型
 
@@ -31,7 +31,7 @@
 
 | 设置 | 默认值 | 说明 |
 |---|---|---|
-| `vschatproxy.baseUrl` | `http://127.0.0.1:58080` | 代理地址（不含 `/v1`） |
+| `vschatproxy.baseUrl` | `http://127.0.0.1:11434` | 代理地址（不含 `/v1`） |
 | `vschatproxy.executablePath` | 空 | `Vs2026ChatProxy.exe` 路径 |
 | `vschatproxy.autoStart` | `false` | 启动 VS Code 时自动拉起代理 |
 

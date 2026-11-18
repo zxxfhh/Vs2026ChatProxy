@@ -3,7 +3,8 @@ namespace Vs2026ChatProxy.Config
     /// <summary>顶层代理配置</summary>
     public class ProxyConfig
     {
-        public int Port { get; set; } = 58080;
+        /// <summary>监听端口。默认 11434（Ollama 默认端口，IDE 添加 Ollama 端点时预填的就是它）</summary>
+        public int Port { get; set; } = 11434;
         public string Host { get; set; } = "127.0.0.1";
         public List<ProviderConfig> Providers { get; set; } = [];
         /// <summary>

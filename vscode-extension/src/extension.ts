@@ -20,12 +20,12 @@ function getConfig(): vscode.WorkspaceConfiguration {
 
 /** 规范化 baseUrl：去掉末尾斜杠与 /v1 后缀 */
 function getBaseUrl(): string {
-    const raw = (getConfig().get<string>('baseUrl') ?? 'http://127.0.0.1:58080').trim();
+    const raw = (getConfig().get<string>('baseUrl') ?? 'http://127.0.0.1:11434').trim();
     let url = raw.replace(/\/+$/, '');
     if (url.endsWith('/v1')) {
         url = url.slice(0, -3).replace(/\/+$/, '');
     }
-    return url || 'http://127.0.0.1:58080';
+    return url || 'http://127.0.0.1:11434';
 }
 
 async function fetchJson<T>(url: string, timeoutMs = FETCH_TIMEOUT_MS): Promise<T> {
@@ -119,9 +119,9 @@ async function startProxy(context: vscode.ExtensionContext): Promise<void> {
     }
 
     // 从 baseUrl 提取端口，写入默认配置模板
-    let port = 58080;
+    let port = 11434;
     try {
-        port = new URL(getBaseUrl()).port ? Number(new URL(getBaseUrl()).port) : 58080;
+        port = new URL(getBaseUrl()).port ? Number(new URL(getBaseUrl()).port) : 11434;
     } catch { /* 用默认值 */ }
     const configPath = await proxyConfigPath(context);
     await ensureProxyConfig(configPath, port);

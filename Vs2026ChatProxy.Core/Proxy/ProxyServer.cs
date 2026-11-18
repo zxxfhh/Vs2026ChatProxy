@@ -26,7 +26,7 @@ namespace Vs2026ChatProxy.Proxy
         // 会话管理：跟踪活跃会话
         public SessionManager Sessions { get; } = new();
 
-        public int Port { get; private set; } = 58080;
+        public int Port { get; private set; } = 11434;
         public string Host { get; private set; } = "127.0.0.1";
         public bool IsRunning => _running;
 

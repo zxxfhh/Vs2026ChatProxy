@@ -83,7 +83,7 @@
       "properties": {
         "vschatproxy.baseUrl": {
           "type": "string",
-          "default": "http://127.0.0.1:58080",
+          "default": "http://127.0.0.1:11434",
           "description": "代理服务地址（不含 /v1 后缀）"
         },
         "vschatproxy.executablePath": {

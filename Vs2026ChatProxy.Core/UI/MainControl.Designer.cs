@@ -358,7 +358,7 @@ namespace Vs2026ChatProxy.UI
             numPort.Size = new Size(59, 23);
             numPort.TabIndex = 2;
             numPort.TextAlign = HorizontalAlignment.Center;
-            numPort.Value = new decimal(new int[] { 58080, 0, 0, 0 });
+            numPort.Value = new decimal(new int[] { 11434, 0, 0, 0 });
             numPort.ValueChanged += numPort_ValueChanged;
             //
             // lblModel
