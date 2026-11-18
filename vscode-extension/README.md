@@ -34,6 +34,7 @@
 | `vschatproxy.baseUrl` | `http://127.0.0.1:11434` | 代理地址（不含 `/v1`） |
 | `vschatproxy.executablePath` | 空 | `Vs2026ChatProxy.exe` 路径 |
 | `vschatproxy.autoStart` | `false` | 启动 VS Code 时自动拉起代理 |
+| `vschatproxy.autoUpdate` | `true` | 启动时检查 GitHub 新版本 |
 
 ## 一键安装 / 卸载
 

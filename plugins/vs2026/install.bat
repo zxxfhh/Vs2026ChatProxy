@@ -28,21 +28,37 @@ if not defined VSI (
 )
 echo [1/3] 找到安装器: %VSI%
 
-rem ── 2. 选取 vsix：优先使用最新构建输出，其次用本目录自带副本 ──
+rem ── 2. 选取 vsix。优先级: 本地构建输出 ^> GitHub 最新 Release ^> 本目录副本 ──
 set "VSIX="
+set "SRC="
 for /f "delims=" %%f in ('dir /b /o-d "%~dp0..\..\Vs2026ChatProxy.VSIX\bin\Release\*.vsix" 2^>nul') do (
     if not defined VSIX set "VSIX=%~dp0..\..\Vs2026ChatProxy.VSIX\bin\Release\%%f"
 )
-if not defined VSIX for /f "delims=" %%f in ('dir /b /o-d "%~dp0*.vsix" 2^>nul') do (
+if defined VSIX set "SRC=本地构建输出" & goto :got_vsix
+
+echo 正在查询 GitHub 最新 Release ...
+powershell -NoProfile -ExecutionPolicy Bypass -Command "try{$r=Invoke-RestMethod 'https://api.github.com/repos/zxxfhh/Vs2026ChatProxy/releases/latest';$a=$r.assets|Where-Object{$_.name -like 'VsCopilotProxy*.vsix'}|Select-Object -First 1;if($a){Invoke-WebRequest $a.browser_download_url -OutFile (Join-Path $env:TEMP 'VsCopilotProxy-latest.vsix');exit 0}else{exit 1}}catch{exit 1}"
+if not errorlevel 1 (
+    if exist "%TEMP%\VsCopilotProxy-latest.vsix" (
+        set "VSIX=%TEMP%\VsCopilotProxy-latest.vsix"
+        set "SRC=GitHub Release 最新版"
+    )
+)
+if defined VSIX goto :got_vsix
+
+for /f "delims=" %%f in ('dir /b /o-d "%~dp0*.vsix" 2^>nul') do (
     if not defined VSIX set "VSIX=%~dp0%%f"
 )
-if not defined VSIX (
-    echo [错误] 未找到 .vsix 包。请先编译解决方案生成 Release，或把 vsix 放到本目录。
-    goto :end
-)
-echo [2/3] 安装包: %VSIX%
+if defined VSIX set "SRC=本目录自带副本" & goto :got_vsix
 
-rem ── 3. 检查 VS 是否正在运行（安装/卸载要求关闭 VS）──
+echo [错误] 未找到 .vsix 包（本地无构建输出、GitHub 无 Release、本目录无副本）。
+goto :end
+
+:got_vsix
+echo [2/3] 安装包: %VSIX%
+echo       来源:   %SRC%
+
+rem ── 3. 检查 VS 是否正在运行（安装要求关闭 VS）──
 tasklist /fi "imagename eq devenv.exe" 2>nul | find /i "devenv.exe" >nul
 if not errorlevel 1 (
     echo [警告] 检测到 Visual Studio 正在运行，建议先全部关闭再安装。

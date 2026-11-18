@@ -2,7 +2,7 @@
   "name": "vs2026-chat-proxy",
   "displayName": "VsChatProxy — 自定义模型代理",
   "description": "管理 Vs2026ChatProxy 本地代理：状态监控、后台启动、一键配置 VS Code 聊天模型（Custom Endpoint）",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "zxxfhh",
   "license": "MIT",
   "repository": {
@@ -50,6 +50,11 @@
         "command": "vschatproxy.openConfig",
         "title": "打开配置文件",
         "category": "VsChatProxy"
+      },
+      {
+        "command": "vschatproxy.checkUpdate",
+        "title": "检查更新",
+        "category": "VsChatProxy"
       }
     ],
     "viewsContainers": {
@@ -95,6 +100,11 @@
           "type": "boolean",
           "default": false,
           "description": "VS Code 启动时代理未运行则自动拉起（需要配置 executablePath）"
+        },
+        "vschatproxy.autoUpdate": {
+          "type": "boolean",
+          "default": true,
+          "description": "启动时检查 GitHub Releases 的新版本并提示更新"
         }
       }
     }

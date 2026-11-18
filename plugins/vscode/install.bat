@@ -26,20 +26,35 @@ if not defined CODE_CMD (
 )
 echo [1/3] 找到 VS Code CLI: %CODE_CMD%
 
-rem ── 2. 选取 vsix：优先使用源码目录最新打包，其次用本目录自带副本 ──
+rem ── 2. 选取 vsix。优先级: 源码目录最新打包 ^> GitHub 最新 Release ^> 本目录副本 ──
 set "VSIX="
+set "SRC="
 for /f "delims=" %%f in ('dir /b /o-d "%~dp0..\..\vscode-extension\*.vsix" 2^>nul') do (
     if not defined VSIX set "VSIX=%~dp0..\..\vscode-extension\%%f"
 )
-if not defined VSIX for /f "delims=" %%f in ('dir /b /o-d "%~dp0*.vsix" 2^>nul') do (
+if defined VSIX set "SRC=源码目录最新打包" & goto :got_vsix
+
+echo 正在查询 GitHub 最新 Release ...
+powershell -NoProfile -ExecutionPolicy Bypass -Command "try{$r=Invoke-RestMethod 'https://api.github.com/repos/zxxfhh/Vs2026ChatProxy/releases/latest';$a=$r.assets|Where-Object{$_.name -like 'vs2026-chat-proxy-*.vsix'}|Select-Object -First 1;if($a){Invoke-WebRequest $a.browser_download_url -OutFile (Join-Path $env:TEMP 'vschatproxy-latest.vsix');exit 0}else{exit 1}}catch{exit 1}"
+if not errorlevel 1 (
+    if exist "%TEMP%\vschatproxy-latest.vsix" (
+        set "VSIX=%TEMP%\vschatproxy-latest.vsix"
+        set "SRC=GitHub Release 最新版"
+    )
+)
+if defined VSIX goto :got_vsix
+
+for /f "delims=" %%f in ('dir /b /o-d "%~dp0*.vsix" 2^>nul') do (
     if not defined VSIX set "VSIX=%~dp0%%f"
 )
-if not defined VSIX (
-    echo [错误] 未找到 .vsix 包。
-    echo        请先在 ..\..\vscode-extension 目录执行:  npm install ^&^& npm run compile ^&^& npx vsce package
-    goto :end
-)
+if defined VSIX set "SRC=本目录自带副本" & goto :got_vsix
+
+echo [错误] 未找到 .vsix 包（源码目录无打包、GitHub 无 Release、本目录无副本）。
+goto :end
+
+:got_vsix
 echo [2/3] 安装包: %VSIX%
+echo       来源:   %SRC%
 
 rem ── 3. 安装（--force 允许覆盖同版本）──
 echo [3/3] 正在安装...

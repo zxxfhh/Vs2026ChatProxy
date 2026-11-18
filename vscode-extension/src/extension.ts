@@ -12,6 +12,14 @@ let modelsProvider: ModelsTreeProvider | undefined;
 const HEALTH_POLL_MS = 10_000;
 const FETCH_TIMEOUT_MS = 2_500;
 
+/** 自动更新：从本仓库 GitHub Releases 拉取最新 vsix */
+const GITHUB_REPO = 'zxxfhh/Vs2026ChatProxy';
+
+interface GithubRelease {
+    tag_name?: string;
+    assets?: { name: string; browser_download_url: string }[];
+}
+
 // ── 工具函数 ──────────────────────────────────────────────
 
 function getConfig(): vscode.WorkspaceConfiguration {
@@ -321,6 +329,94 @@ function fmtContext(n: number): string {
 
 // ── 入口 ─────────────────────────────────────────────────
 
+// ── 自动更新（GitHub Releases）──────────────────────────
+
+/** 语义化比较：a < b 返回 true */
+function versionLt(a: string, b: string): boolean {
+    const pa = a.replace(/^v/, '').split('.').map((n) => parseInt(n, 10) || 0);
+    const pb = b.replace(/^v/, '').split('.').map((n) => parseInt(n, 10) || 0);
+    for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+        const d = (pa[i] ?? 0) - (pb[i] ?? 0);
+        if (d !== 0) {
+            return d < 0;
+        }
+    }
+    return false;
+}
+
+/**
+ * 检查 GitHub 最新 Release；发现新版本时提示更新。
+ * 手动模式（notifyUser=true）下即使无更新也给出反馈。
+ */
+async function checkForUpdate(context: vscode.ExtensionContext, notifyUser = false): Promise<void> {
+    const autoUpdate = getConfig().get<boolean>('autoUpdate') ?? true;
+    if (!autoUpdate && !notifyUser) {
+        return;
+    }
+    let latest = '';
+    let asset: { name: string; browser_download_url: string } | undefined;
+    try {
+        const rel = await fetchJson<GithubRelease>(`https://api.github.com/repos/${GITHUB_REPO}/releases/latest`, 5_000);
+        latest = (rel.tag_name ?? '').replace(/^v/, '');
+        asset = rel.assets?.find((a) => a.name.startsWith('vs2026-chat-proxy-') && a.name.endsWith('.vsix'));
+    } catch {
+        if (notifyUser) {
+            void vscode.window.showWarningMessage('VsChatProxy: 检查更新失败（网络不可用或 GitHub 限流）');
+        }
+        return;
+    }
+    const current = String(context.extension.packageJSON?.version ?? '0.0.0');
+    if (!latest || !asset || !versionLt(current, latest)) {
+        if (notifyUser) {
+            void vscode.window.showInformationMessage(`VsChatProxy 已是最新版本 ${current}`);
+        }
+        return;
+    }
+
+    const choice = await vscode.window.showInformationMessage(
+        `VsChatProxy 有新版本 ${latest}（当前 ${current}）`,
+        '立即更新',
+        '查看发布说明',
+    );
+    if (choice === '查看发布说明') {
+        void vscode.env.openExternal(vscode.Uri.parse(`https://github.com/${GITHUB_REPO}/releases/latest`));
+        return;
+    }
+    if (choice !== '立即更新') {
+        return;
+    }
+
+    try {
+        // 下载 vsix 到 globalStorage 并调用内置命令安装
+        const dir = context.globalStorageUri.fsPath;
+        await fs.promises.mkdir(dir, { recursive: true });
+        const target = path.join(dir, asset.name);
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 30_000);
+        try {
+            const res = await fetch(asset.browser_download_url, { signal: controller.signal });
+            if (!res.ok) {
+                throw new Error(`HTTP ${res.status}`);
+            }
+            await fs.promises.writeFile(target, Buffer.from(await res.arrayBuffer()));
+        } finally {
+            clearTimeout(timer);
+        }
+        await vscode.commands.executeCommand('workbench.extensions.installExtension', vscode.Uri.file(target));
+        const reload = await vscode.window.showInformationMessage(
+            `VsChatProxy v${latest} 已下载并安装，重载窗口后生效`,
+            '重新加载窗口',
+        );
+        if (reload === '重新加载窗口') {
+            await vscode.commands.executeCommand('workbench.action.reloadWindow');
+        }
+    } catch (err) {
+        void vscode.window.showErrorMessage(
+            `更新失败: ${err instanceof Error ? err.message : String(err)}（可从 Release 页手动下载）`,
+        );
+    }
+}
+
 export function activate(context: vscode.ExtensionContext): void {
     statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
     statusBarItem.command = 'vschatproxy.statusMenu';
@@ -340,6 +436,7 @@ export function activate(context: vscode.ExtensionContext): void {
     register('vschatproxy.showModels', () => vscode.commands.executeCommand('vschatproxy.models.focus'));
     register('vschatproxy.refreshModels', () => modelsProvider?.refresh());
     register('vschatproxy.openConfig', () => openConfig(context));
+    register('vschatproxy.checkUpdate', () => checkForUpdate(context, true));
     register('vschatproxy.copyModelId', async (id: string) => {
         await vscode.env.clipboard.writeText(id);
         void vscode.window.setStatusBarMessage(`已复制: ${id}`, 3000);
@@ -382,6 +479,9 @@ export function activate(context: vscode.ExtensionContext): void {
             }
         });
     }
+
+    // 启动时静默检查更新（vschatproxy.autoUpdate 控制，也可手动触发命令）
+    void checkForUpdate(context);
 }
 
 export function deactivate(): void {
