@@ -37,10 +37,7 @@
 
 ## 一键安装 / 卸载
 
-本目录直接双击：
-
-- `install.bat` —— 自动定位 VS Code CLI，安装目录内最新的 `.vsix`（不挑版本号，同版本可覆盖）
-- `uninstall.bat` —— 卸载扩展（`zxxfhh.vs2026-chat-proxy`）
+见 `plugins\vscode\` 目录（install.bat / uninstall.bat，自动安装本目录最新打包的 vsix）。
 
 ## 从源码打包
 
@@ -48,5 +45,5 @@
 npm install
 npm run compile
 npx vsce package
-# 然后运行 install.bat，或在 VS Code 中: Extensions → ... → Install from VSIX
+# 然后运行 plugins\vscode\install.bat，或在 VS Code 中: Extensions → ... → Install from VSIX
 ```

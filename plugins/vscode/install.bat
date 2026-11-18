@@ -2,7 +2,6 @@
 setlocal
 title VsChatProxy VS Code 插件一键安装
 
-rem ── 切到本脚本所在目录 ──
 cd /d "%~dp0"
 
 echo ============================================
@@ -27,14 +26,17 @@ if not defined CODE_CMD (
 )
 echo [1/3] 找到 VS Code CLI: %CODE_CMD%
 
-rem ── 2. 取本目录最新的 .vsix（按修改时间，避免写死版本号）──
+rem ── 2. 选取 vsix：优先使用源码目录最新打包，其次用本目录自带副本 ──
 set "VSIX="
-for /f "delims=" %%f in ('dir /b /o-d "*.vsix" 2^>nul') do (
-    if not defined VSIX set "VSIX=%%f"
+for /f "delims=" %%f in ('dir /b /o-d "%~dp0..\..\vscode-extension\*.vsix" 2^>nul') do (
+    if not defined VSIX set "VSIX=%~dp0..\..\vscode-extension\%%f"
+)
+if not defined VSIX for /f "delims=" %%f in ('dir /b /o-d "%~dp0*.vsix" 2^>nul') do (
+    if not defined VSIX set "VSIX=%~dp0%%f"
 )
 if not defined VSIX (
-    echo [错误] 本目录没有 .vsix 包。
-    echo        请先在本目录执行:  npm install ^&^& npm run compile ^&^& npx vsce package
+    echo [错误] 未找到 .vsix 包。
+    echo        请先在 ..\..\vscode-extension 目录执行:  npm install ^&^& npm run compile ^&^& npx vsce package
     goto :end
 )
 echo [2/3] 安装包: %VSIX%

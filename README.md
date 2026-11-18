@@ -10,6 +10,16 @@
 | **VSIX 插件**（`Vs2026ChatProxy.VSIX`） | 集成到 VS 2026 的 Tool Window（View → Other Windows → VsCopilotProxy） |
 | **VS Code 插件**（`vscode-extension/`） | 状态栏监控 + 后台拉起代理 + 一键配置 VS Code Chat 模型 |
 
+**插件安装包与一键安装/卸载脚本在 `plugins/` 目录**：
+
+```
+plugins/
+├── vs2026/   install.bat / uninstall.bat / VsCopilotProxy.vsix        ← Visual Studio 插件
+└── vscode/   install.bat / uninstall.bat / vs2026-chat-proxy-*.vsix   ← VS Code 插件
+```
+
+脚本优先安装最新构建输出（VS 为 Release vsix、VS Code 为 vscode-extension 最新打包），目录自带副本作为兜底（可整个目录拷走分发）。
+
 参考项目：[CopilotProxy](../CopilotProxy)（端点行为与协议兼容性以其为准）。
 
 ---
