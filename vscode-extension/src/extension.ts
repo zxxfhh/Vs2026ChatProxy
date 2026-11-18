@@ -358,7 +358,7 @@ async function checkForUpdate(context: vscode.ExtensionContext, notifyUser = fal
     try {
         const rel = await fetchJson<GithubRelease>(`https://api.github.com/repos/${GITHUB_REPO}/releases/latest`, 5_000);
         latest = (rel.tag_name ?? '').replace(/^v/, '');
-        asset = rel.assets?.find((a) => a.name.startsWith('vs2026-chat-proxy-') && a.name.endsWith('.vsix'));
+        asset = rel.assets?.find((a) => a.name === 'VsCodeCopilotProxy.vsix');
     } catch {
         if (notifyUser) {
             void vscode.window.showWarningMessage('VsChatProxy: 检查更新失败（网络不可用或 GitHub 限流）');

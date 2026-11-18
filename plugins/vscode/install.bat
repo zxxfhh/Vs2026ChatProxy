@@ -1,11 +1,11 @@
 @echo off
 setlocal
-title VsChatProxy VS Code 插件一键安装
+title VsCodeCopilotProxy VS Code 插件一键安装
 
 cd /d "%~dp0"
 
 echo ============================================
-echo   VsChatProxy VS Code 插件 一键安装
+echo   VsCodeCopilotProxy VS Code 插件 一键安装
 echo ============================================
 echo.
 
@@ -34,11 +34,11 @@ for /f "delims=" %%f in ('dir /b /o-d "%~dp0..\..\vscode-extension\*.vsix" 2^>nu
 )
 if defined VSIX set "SRC=源码目录最新打包" & goto :got_vsix
 
-echo 正在查询 GitHub 最新 Release ...
-powershell -NoProfile -ExecutionPolicy Bypass -Command "try{$r=Invoke-RestMethod 'https://api.github.com/repos/zxxfhh/Vs2026ChatProxy/releases/latest';$a=$r.assets|Where-Object{$_.name -like 'vs2026-chat-proxy-*.vsix'}|Select-Object -First 1;if($a){Invoke-WebRequest $a.browser_download_url -OutFile (Join-Path $env:TEMP 'vschatproxy-latest.vsix');exit 0}else{exit 1}}catch{exit 1}"
+echo 正在从 GitHub 下载最新 Release ...
+powershell -NoProfile -ExecutionPolicy Bypass -Command "try{Invoke-WebRequest 'https://github.com/zxxfhh/Vs2026ChatProxy/releases/latest/download/VsCodeCopilotProxy.vsix' -OutFile (Join-Path $env:TEMP 'VsCodeCopilotProxy-latest.vsix');exit 0}catch{exit 1}"
 if not errorlevel 1 (
-    if exist "%TEMP%\vschatproxy-latest.vsix" (
-        set "VSIX=%TEMP%\vschatproxy-latest.vsix"
+    if exist "%TEMP%\VsCodeCopilotProxy-latest.vsix" (
+        set "VSIX=%TEMP%\VsCodeCopilotProxy-latest.vsix"
         set "SRC=GitHub Release 最新版"
     )
 )
@@ -49,7 +49,8 @@ for /f "delims=" %%f in ('dir /b /o-d "%~dp0*.vsix" 2^>nul') do (
 )
 if defined VSIX set "SRC=本目录自带副本" & goto :got_vsix
 
-echo [错误] 未找到 .vsix 包（源码目录无打包、GitHub 无 Release、本目录无副本）。
+echo [错误] 未找到 .vsix 包（源码目录无打包、GitHub 下载失败、本目录无副本）。
+echo        若仓库为私有，Release 下载需要登录权限，请先公开仓库或使用本地构建。
 goto :end
 
 :got_vsix

@@ -14,11 +14,40 @@
 
 ```
 plugins/
-├── vs2026/   install.bat / uninstall.bat / VsCopilotProxy.vsix        ← Visual Studio 插件
-└── vscode/   install.bat / uninstall.bat / vs2026-chat-proxy-*.vsix   ← VS Code 插件
+├── vs2026/   install.bat / uninstall.bat / Vs2026CopilotProxy.vsix   ← Visual Studio 2026 插件
+└── vscode/   install.bat / uninstall.bat / VsCodeCopilotProxy.vsix   ← VS Code 插件
 ```
 
-脚本优先安装最新构建输出（VS 为 Release vsix、VS Code 为 vscode-extension 最新打包），目录自带副本作为兜底（可整个目录拷走分发）。
+安装来源优先级：本地构建输出 → GitHub 最新 Release → 目录自带副本（可整个目录拷走离线分发）。
+
+## 网络一键安装（仓库需 Public）
+
+固定文件名解锁了 GitHub 稳定下载地址 `releases/latest/download/<文件名>`，无需 API、无需版本号：
+
+**VS Code**（PowerShell 执行，一行安装最新版）：
+
+```powershell
+powershell -c "iwr https://github.com/zxxfhh/Vs2026ChatProxy/releases/latest/download/VsCodeCopilotProxy.vsix -OutFile $env:TEMP\p.vsix; code --install-extension $env:TEMP\p.vsix --force"
+```
+
+**Visual Studio**（PowerShell 下载 + 安装器）：
+
+```powershell
+powershell -c "iwr https://github.com/zxxfhh/Vs2026ChatProxy/releases/latest/download/Vs2026CopilotProxy.vsix -OutFile $env:TEMP\p.vsix; & \"${env:ProgramFiles}\Microsoft Visual Studio\18\Community\Common7\IDE\VSIXInstaller.exe\" $env:TEMP\p.vsix"
+```
+
+（路径按实际 VS 安装位置调整；也可以直接双击 `plugins/*/install.bat`，会自动走上述下载）
+
+## 自动发布
+
+推送 `v*` 标签触发 GitHub Actions 自动构建并发布 Release（`.github/workflows/release.yml`）：
+
+```bash
+git push origin main
+git tag v1.1.2 && git push origin v1.1.2   # 示例
+```
+
+VS Code 插件（0.2.0+）启动时会自动检查 GitHub 新版本并提示一键更新。
 
 参考项目：[CopilotProxy](../CopilotProxy)（端点行为与协议兼容性以其为准）。
 

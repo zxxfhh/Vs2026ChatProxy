@@ -20,7 +20,7 @@ jobs:
       - name: Build solution (Release)
         run: msbuild Vs2026ChatProxy.sln /p:Configuration=Release /restore /m /v:m
 
-      # ── 构建 VS Code 插件 vsix ──
+      # ── 构建 VS Code 插件 vsix（固定文件名，不带版本号）──
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -29,7 +29,7 @@ jobs:
         run: |
           npm ci
           npm run compile
-          npx vsce package --allow-missing-repository
+          npx vsce package --allow-missing-repository --out VsCodeCopilotProxy.vsix
 
       # ── 独立 exe 打包（VS Code 插件后台拉起代理用）──
       - name: Zip standalone exe
@@ -41,14 +41,14 @@ jobs:
       - name: Sync plugins folder
         shell: pwsh
         run: |
-          Copy-Item "Vs2026ChatProxy.VSIX/bin/Release/VsCopilotProxy.vsix" "plugins/vs2026/" -Force
-          Copy-Item "vscode-extension/vs2026-chat-proxy-*.vsix" "plugins/vscode/" -Force
+          Copy-Item "Vs2026ChatProxy.VSIX/bin/Release/Vs2026CopilotProxy.vsix" "plugins/vs2026/" -Force
+          Copy-Item "vscode-extension/VsCodeCopilotProxy.vsix" "plugins/vscode/" -Force
 
       # ── 创建 Release 并附产物 ──
       - uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
           files: |
-            Vs2026ChatProxy.VSIX/bin/Release/VsCopilotProxy.vsix
+            Vs2026ChatProxy.VSIX/bin/Release/Vs2026CopilotProxy.vsix
             Vs2026ChatProxy-exe-win.zip
-            vscode-extension/vs2026-chat-proxy-*.vsix
+            vscode-extension/VsCodeCopilotProxy.vsix
