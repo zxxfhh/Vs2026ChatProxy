@@ -21,7 +21,7 @@ namespace Vs2026ChatProxy.Proxy
     public static class ToolCallNormalizer
     {
         /// <summary>规范化单个 Tool Call 的参数。返回 null 表示丢弃无效的 tool call。</summary>
-        public static ToolCall? Normalize(ToolCall tc)
+        public static ToolCall? Normalize(ToolCall tc, string? workspaceRoot = null)
         {
             if (tc == null) return null;
 
@@ -31,40 +31,45 @@ namespace Vs2026ChatProxy.Proxy
             // 空名字 → 丢弃
             if (string.IsNullOrEmpty(name)) return null;
 
-            // 0. 预处理：在 JSON 解析之前，暴力清理路径字段中的多重反斜杠
-            //    GLM 模型经常在 JSON 字符串值中输出 ZhjngkModel\\\\\\MEntity\\\\\\...
-            //    这些在 JSON 字面量中是合法的（\\\\ = \\），但解析后变成多重反斜杠。
-            //    直接在原始 JSON 文本层面替换：将 3 个及以上连续反斜杠替换为单个正斜杠。
-            rawArgs = Regex.Replace(rawArgs, @"\\{3,}", "/");
-
             // 1. 修复无效的 JSON 转义序列（如 \c \n 在非预期位置）
             rawArgs = FixEscapeSequences(rawArgs);
 
             // 2. 尝试解析 JSON
             JObject? parsed = null;
+            bool jsonParseFailed = false;
             try
             {
                 parsed = JObject.Parse(rawArgs);
             }
             catch
             {
+                jsonParseFailed = true;
                 // 3. 畸形 JSON 尝试修复
                 parsed = TryFixMalformedJson(rawArgs);
                 if (parsed == null)
-                    return SalvageToolCall(name, rawArgs); // 无法修复，尝试正则提取；失败返回 null
+                    return SalvageToolCall(name, rawArgs, workspaceRoot); // 传入 workspaceRoot
             }
 
             if (parsed == null) return null;
 
-            // 4. 工具特定参数别名映射（参考 CopilotProxy tool-extractor.js normalizeToolCall）
-            //    AI 模型经常输出非标准参数名（如 filePath→filename, cmd→command），
-            //    必须映射为 VS 期望的标准字段名。
+            // 4. JSON 解析成功后，对所有字符串值做路径反斜杠清理
+            CleanAllStringValues(parsed);
+
+            // 5. 工具特定参数别名映射
             NormalizeToolParams(name, parsed);
 
-            // 5. 路径格式规范化（常见于文件操作工具）
+            // 6. 路径格式规范化
             NormalizePathFields(parsed);
 
-            // 6. 为已知工具填充默认值（参考 CopilotProxy 的 applyToolDefaults）
+            // 7. 相对路径 → 绝对路径（关键修复！）
+            //    VS 2026 的 get_file/file_search 等工具需要绝对路径
+            //    模型经常输出相对路径如 ZhjngkModel/MEntity/Inspection/xxx.cs
+            if (!string.IsNullOrEmpty(workspaceRoot))
+            {
+                ResolveToAbsolutePath(name, parsed, workspaceRoot);
+            }
+
+            // 8. 为已知工具填充默认值
             if (ToolSchemas.IsKnownTool(name))
             {
                 parsed = ToolSchemas.ApplyDefaults(name, parsed);
@@ -79,10 +84,10 @@ namespace Vs2026ChatProxy.Proxy
         }
 
         /// <summary>批量规范化 Tool Call 列表（过滤掉返回 null 的无效项）</summary>
-        public static List<ToolCall> NormalizeAll(List<ToolCall> toolCalls)
+        public static List<ToolCall> NormalizeAll(List<ToolCall> toolCalls, string? workspaceRoot = null)
         {
             if (toolCalls == null || toolCalls.Count == 0) return toolCalls!;
-            return toolCalls.Select(Normalize).Where(tc => tc != null).ToList()!;
+            return toolCalls.Select(tc => Normalize(tc, workspaceRoot)).Where(tc => tc != null).ToList()!;
         }
 
         /// <summary>修复无效的 JSON 转义序列</summary>
@@ -91,6 +96,59 @@ namespace Vs2026ChatProxy.Proxy
             // 修复 Windows 路径中的反斜杠：未转义的 \C \J \P 等
             // 但排除合法的 JSON 转义：\" \\ \/ \b \f \n \r \t \uXXXX
             return Regex.Replace(json, @"\\([^""\\\/bfnrtu])", @"\\$1");
+        }
+
+        /// <summary>
+        /// JSON 解析后，遍历所有字符串值，将反斜杠替换为正斜杠。
+        /// 这解决了 GLM 模型输出 ZhjngkModel\MEntity 或 ZhjngkModel\\\MEntity 的问题。
+        /// 在 JSON 解析后操作，避免破坏 JSON 转义结构。
+        /// </summary>
+        private static void CleanAllStringValues(JObject obj)
+        {
+            foreach (var prop in obj.Properties().ToList())
+            {
+                if (prop.Value.Type == JTokenType.String)
+                {
+                    var val = prop.Value.ToString();
+                    if (val.Contains('\\'))
+                    {
+                        prop.Value = CleanPathValue(val);
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// 将相对路径解析为绝对路径。
+        /// VS 2026 的 get_file/file_search 等工具需要绝对路径，
+        /// 但模型经常输出相对路径如 ZhjngkModel/MEntity/Inspection/xxx.cs。
+        /// 如果路径已经是绝对路径（包含盘符如 C:\ 或 /），则不动。
+        /// </summary>
+        private static void ResolveToAbsolutePath(string toolName, JObject args, string workspaceRoot)
+        {
+            var pathFields = new[] { "filename", "filePath", "path", "dir", "directory" };
+            foreach (var field in pathFields)
+            {
+                var token = args[field];
+                if (token?.Type != JTokenType.String) continue;
+                var val = token.ToString();
+                if (string.IsNullOrEmpty(val)) continue;
+
+                // 已经是绝对路径？（Windows: C:\xxx, X:/xxx; Unix: /xxx）
+                if (val.Length >= 2 && val[1] == ':') continue;
+                if (val.StartsWith("/")) continue;
+
+                // 相对路径 → 拼接工作区根路径
+                var root = workspaceRoot.Replace('\\', '/');
+                if (!root.EndsWith("/")) root += "/";
+                var resolved = root + val;
+
+                // 去除可能的 // 重复
+                while (resolved.Contains("//"))
+                    resolved = resolved.Replace("//", "/");
+
+                args[field] = resolved;
+            }
         }
 
         /// <summary>
@@ -141,7 +199,7 @@ namespace Vs2026ChatProxy.Proxy
         /// 正则提取：当 JSON 完全无法解析时，尝试从原始文本中提取关键字段。
         /// 参考 CopilotProxy 的 salvageToolCall。
         /// </summary>
-        private static ToolCall? SalvageToolCall(string name, string raw)
+        private static ToolCall? SalvageToolCall(string name, string raw, string? workspaceRoot = null)
         {
             if (string.IsNullOrEmpty(name)) return null;
 
@@ -159,7 +217,6 @@ namespace Vs2026ChatProxy.Proxy
                         {
                             result["filePath"] = filePath;
                             result["content"] = content ?? "";
-                            return new ToolCall { Name = name, Arguments = result.ToString(Formatting.None) };
                         }
                         break;
 
@@ -170,7 +227,6 @@ namespace Vs2026ChatProxy.Proxy
                             result["filename"] = filename;
                             result["startLine"] = ExtractIntValue(raw, "startLine") ?? 1;
                             result["endLine"] = ExtractIntValue(raw, "endLine") ?? 0;
-                            return new ToolCall { Name = name, Arguments = result.ToString(Formatting.None) };
                         }
                         break;
 
@@ -183,7 +239,6 @@ namespace Vs2026ChatProxy.Proxy
                             result["filePath"] = rPath;
                             result["oldString"] = oldStr;
                             result["newString"] = newStr ?? "";
-                            return new ToolCall { Name = name, Arguments = result.ToString(Formatting.None) };
                         }
                         break;
 
@@ -194,10 +249,23 @@ namespace Vs2026ChatProxy.Proxy
                             result["command"] = cmd;
                             result["summary"] = ExtractQuotedValue(raw, "summary") ?? cmd;
                             result["background"] = false;
-                            return new ToolCall { Name = name, Arguments = result.ToString(Formatting.None) };
                         }
                         break;
                 }
+
+                if (result.Count == 0) return null;
+
+                // 统一后处理：清理路径 + 补全绝对路径
+                CleanAllStringValues(result);
+                if (!string.IsNullOrEmpty(workspaceRoot))
+                    ResolveToAbsolutePath(name, result, workspaceRoot);
+
+                return new ToolCall
+                {
+                    Id = $"call_{Guid.NewGuid():N}",
+                    Name = name,
+                    Arguments = result.ToString(Formatting.None)
+                };
             }
             catch { }
 

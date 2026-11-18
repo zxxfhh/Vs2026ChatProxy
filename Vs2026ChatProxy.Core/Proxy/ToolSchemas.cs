@@ -228,6 +228,13 @@ namespace Vs2026ChatProxy.Proxy
                     SetDefaultIfMissing(args, "startLine", 1);
                     SetDefaultIfMissing(args, "endLine", 0);
                     SetDefaultIfMissing(args, "includeLineNumbers", false);
+                    // VS 2026 要求 endLine >= startLine，endLine=0 表示"读全文"，改为大值
+                    {
+                        var sl = args["startLine"]?.Value<int>() ?? 1;
+                        var el = args["endLine"]?.Value<int>() ?? 0;
+                        if (el > 0 && el < sl) args["endLine"] = sl;
+                        else if (el == 0 && sl > 0) args["endLine"] = 999999;
+                    }
                     break;
 
                 case "run_command_in_terminal":

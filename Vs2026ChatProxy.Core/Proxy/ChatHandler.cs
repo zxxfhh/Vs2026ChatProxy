@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.RegularExpressions;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using Vs2026ChatProxy.Config;
@@ -94,6 +95,26 @@ namespace Vs2026ChatProxy.Proxy
             // 转换 OpenAI messages → ChatMessage 列表
             var messages = ConvertMessages(req["messages"] as JArray);
 
+            // 提取工作区根路径（用于将相对路径补全为绝对路径）
+            // 直接从请求消息文本中提取，兼容多种格式
+            string? workspaceRoot = null;
+            if (req["messages"] is JArray msgArr)
+            {
+                foreach (var m in msgArr)
+                {
+                    var c = m["content"]?.ToString() ?? "";
+                    if (string.IsNullOrEmpty(c)) continue;
+                    // 格式1: "workspace root path is:\nI:\xxx\"
+                    var m1 = Regex.Match(c, @"workspace\s+root\s+path\s+is:\s*([\r\n]+)?([A-Za-z]:[\\/][^\s\r\n""']+)", RegexOptions.IgnoreCase);
+                    if (m1.Success) { workspaceRoot = m1.Groups[2].Value.TrimEnd('\\', '/'); break; }
+                    // 格式2: "workspaceRoot:I:\xxx" 或 "workspace_root: I:\xxx"
+                    var m2 = Regex.Match(c, @"(?:workspace[_-]?root|workspaceRoot|project[_-]?path)[:\s]+([A-Za-z]:[\\/][^\s\r\n""']+)", RegexOptions.IgnoreCase);
+                    if (m2.Success) { workspaceRoot = m2.Groups[1].Value.TrimEnd('\\', '/'); break; }
+                }
+            }
+            if (!string.IsNullOrEmpty(workspaceRoot))
+                onLog?.Invoke($"   📂 workspaceRoot: {workspaceRoot}");
+
             // 上下文压缩（超限时自动触发）
             try
             {
@@ -154,9 +175,9 @@ namespace Vs2026ChatProxy.Proxy
                 }
 
                 if (useStream)
-                    await HandleStreamAsync(responseBody, client, messages, options, modelStr, onLog, ct);
+                    await HandleStreamAsync(responseBody, client, messages, options, modelStr, onLog, ct, workspaceRoot);
                 else
-                    await HandleNonStreamAsync(responseBody, client, messages, options, modelStr, onLog, ct);
+                    await HandleNonStreamAsync(responseBody, client, messages, options, modelStr, onLog, ct, workspaceRoot);
             }
             catch (HttpListenerException ex)
             {
@@ -174,7 +195,7 @@ namespace Vs2026ChatProxy.Proxy
         }
 
         private static async Task HandleStreamAsync(Stream body, IChatClient client,
-            List<ChatMessage> messages, ChatOptions options, string displayModel, Action<string>? onLog, CancellationToken ct)
+            List<ChatMessage> messages, ChatOptions options, string displayModel, Action<string>? onLog, CancellationToken ct, string? workspaceRoot = null)
         {
             // SSE headers
             // 注意: headers 由 ProxyServer 在 HttpContext 层设置，这里直接写 body
@@ -285,7 +306,7 @@ namespace Vs2026ChatProxy.Proxy
                     }).ToList();
 
                 // 2. 对每个 tool call 做规范化（修复 JSON、填充默认值、路径修正等）
-                var normalizedCalls = ToolCallNormalizer.NormalizeAll(rawToolCalls);
+                var normalizedCalls = ToolCallNormalizer.NormalizeAll(rawToolCalls, workspaceRoot);
 
                 // 3. 如果 normalize 后全部被丢弃（返回空），尝试从累积文本中提取
                 if (normalizedCalls.Count == 0 && fullContent.Length > 0)
@@ -306,6 +327,9 @@ namespace Vs2026ChatProxy.Proxy
                     {
                         var tc = normalizedCalls[i];
                         onLog?.Invoke($"   🔧 tool_call[{i}]: {tc.Name}({(tc.Arguments?.Length > 200 ? tc.Arguments.Substring(0, 200) + "..." : tc.Arguments)})");
+                        // 诊断：检查路径值是否包含反斜杠
+                        var diagFilename = System.Text.RegularExpressions.Regex.Match(tc.Arguments ?? "", @"""filename""\s*:\s*""([^""]*)""");
+                        if (diagFilename.Success) onLog?.Invoke($"   📋 diag filename raw: [{diagFilename.Groups[1].Value}]");
                         await SseWriter.WriteEventAsync(body,
                             SseWriter.CreateToolCallChunk(chunkId, displayModel, i,
                                 tc.Id, tc.Name, tc.Arguments ?? "{}"), ct);
@@ -391,7 +415,7 @@ namespace Vs2026ChatProxy.Proxy
         }
 
         private static async Task HandleNonStreamAsync(Stream body, IChatClient client,
-            List<ChatMessage> messages, ChatOptions options, string displayModel, Action<string>? onLog, CancellationToken ct)
+            List<ChatMessage> messages, ChatOptions options, string displayModel, Action<string>? onLog, CancellationToken ct, string? workspaceRoot = null)
         {
             var result = await client.ChatAsync(messages, options, ct);
 
@@ -403,7 +427,7 @@ namespace Vs2026ChatProxy.Proxy
 
             if (toolCalls.Count > 0)
             {
-                toolCalls = ToolCallNormalizer.NormalizeAll(toolCalls);
+                toolCalls = ToolCallNormalizer.NormalizeAll(toolCalls, workspaceRoot);
             }
             else if (!string.IsNullOrEmpty(result.Content))
             {
