@@ -308,7 +308,7 @@ namespace Vs2026ChatProxy.Proxy
                 try
                 {
                     var (providerName, modelId) = ModelEncoding.Decode(modelName);
-                    var provider = config.Providers.FirstOrDefault(p => p.Name == providerName);
+                    var provider = config.Providers.FirstOrDefault(p => ModelEncoding.ProviderMatches(providerName, p.Name));
                     var model = provider?.FindModel(modelId);
                     if (provider != null && model != null)
                     {
@@ -339,8 +339,9 @@ namespace Vs2026ChatProxy.Proxy
             {
                 foreach (var m in provider.Models)
                 {
-                    // Ollama 格式：模型名用 provider:model 编码
-                    var tagName = $"{provider.Name}:{m.Id}";
+                    // Ollama 格式：模型名用 provider:model 编码（provider 段净化为 ASCII，
+                    // VS 2026 的 Ollama 客户端会校验标签合法性，中文 ID 会被置灰）
+                    var tagName = $"{ModelEncoding.SanitizeProviderName(provider.Name)}:{m.Id}";
                     models.Add(new
                     {
                         name = tagName,

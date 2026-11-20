@@ -20,6 +20,33 @@ namespace Vs2026ChatProxy.Proxy
             return (stripped.Substring(0, idx), stripped.Substring(idx + 1));
         }
 
+        /// <summary>
+        /// 把 Provider 名净化为 Ollama 标签合法字符（[a-zA-Z0-9._-]）。
+        /// VS 2026 的 Ollama 客户端会校验标签格式：含中文等非 ASCII 字符的模型 ID
+        /// 在管理页正常显示，但在模型选择器中被置灰不可选。
+        /// 例: "智谱Coding" → "Coding"；全非 ASCII 时回退 "provider"。
+        /// </summary>
+        public static string SanitizeProviderName(string name)
+        {
+            var sb = new System.Text.StringBuilder();
+            foreach (var ch in name)
+            {
+                if ((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9')
+                    || ch == '_' || ch == '-' || ch == '.')
+                    sb.Append(ch);
+            }
+            var result = sb.ToString().Trim('.');
+            return result.Length > 0 ? result : "provider";
+        }
+
+        /// <summary>
+        /// 判断请求带回的 provider 名是否匹配配置项：兼容原始名与净化名
+        /// （对外广播净化名，请求两种形式都可能回来）。
+        /// </summary>
+        public static bool ProviderMatches(string requestedName, string actualName)
+            => requestedName == actualName
+               || string.Equals(requestedName, SanitizeProviderName(actualName), StringComparison.OrdinalIgnoreCase);
+
         /// <summary>编码 model 字段（用于 /v1/models 展示）</summary>
         public static string EncodeWithDisplay(string providerName, ModelConfig model)
         {
@@ -27,7 +54,7 @@ namespace Vs2026ChatProxy.Proxy
             // 只有开启了"组合"且有标签时，才拼接到 id 中
             if (model.AppendContextTag && !string.IsNullOrEmpty(model.ContextTag))
                 id += " " + model.ContextTag;
-            return $"{providerName}:{id}";
+            return $"{SanitizeProviderName(providerName)}:{id}";
         }
 
         /// <summary>从 model 字符串中剥离上下文标签</summary>

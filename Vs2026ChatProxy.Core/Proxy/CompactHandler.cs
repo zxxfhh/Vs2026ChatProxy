@@ -38,7 +38,7 @@ namespace Vs2026ChatProxy.Proxy
                 return;
             }
 
-            var provider = config.Providers.FirstOrDefault(p => p.Name == providerName);
+            var provider = config.Providers.FirstOrDefault(p => ModelEncoding.ProviderMatches(providerName, p.Name));
             if (provider == null)
             {
                 await WriteJsonAsync(res, 400, new { error = $"Provider \"{providerName}\" not found" });

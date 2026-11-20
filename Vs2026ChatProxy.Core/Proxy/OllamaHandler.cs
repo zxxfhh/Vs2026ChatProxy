@@ -81,7 +81,7 @@ namespace Vs2026ChatProxy.Proxy
                 return;
             }
 
-            var provider = config.Providers.FirstOrDefault(p => p.Name == providerName);
+            var provider = config.Providers.FirstOrDefault(p => ModelEncoding.ProviderMatches(providerName, p.Name));
             if (provider == null)
             {
                 onLog?.Invoke($"   ❌ [Ollama] Provider \"{providerName}\" 未找到");

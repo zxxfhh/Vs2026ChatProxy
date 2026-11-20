@@ -135,6 +135,10 @@ MSBuild Vs2026ChatProxy.sln /p:Configuration=Release
 
 说明：这类客户端通常走 `GET /api/tags`（模型列表）+ `POST /api/chat`（非流式对话），代理均已兼容；对话响应速度取决于所选模型（思考型模型会先消耗推理 token）。
 
+### 常见问题：模型在 VS 选择器里是灰色
+
+VS 的 Ollama 客户端会校验模型标签格式（仅允许 `[a-zA-Z0-9._:-]`）。Provider 名称含中文（如 `智谱Coding`）时，管理页能显示但选择器置灰不可选。代理已内置净化（自动把 `智谱Coding:glm-5.3` 广播为 `Coding:glm-5.3`，请求两种形式都能识别）；也可以直接把 Provider 名改成纯英文/数字（推荐，ID 更直观）。改完后在 VS「管理模型」里移除再重新添加 Ollama 端点即可刷新。
+
 ---
 
 ## VS Code 插件（vscode-extension/）

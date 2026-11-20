@@ -70,7 +70,7 @@ namespace Vs2026ChatProxy.Proxy
             }
 
             // 查找配置
-            var provider = config.Providers.FirstOrDefault(p => p.Name == providerName);
+            var provider = config.Providers.FirstOrDefault(p => ModelEncoding.ProviderMatches(providerName, p.Name));
             if (provider == null)
             {
                 onLog?.Invoke($"   ❌ Provider \"{providerName}\" 未找到");
