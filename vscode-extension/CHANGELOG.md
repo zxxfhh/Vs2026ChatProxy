@@ -8,3 +8,7 @@
 
 - 新增自动更新：启动时检查 GitHub Releases，新版提示一键下载安装（`vschatproxy.autoUpdate` 可关闭）
 - 新增命令「检查更新」
+
+## 1.1.3
+
+- 版本号与仓库 tag 对齐（修复 0.2.0 vs tag 1.1.2 导致的更新提示死循环）

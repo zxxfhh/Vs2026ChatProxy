@@ -2,7 +2,7 @@
   "name": "vs2026-chat-proxy",
   "displayName": "VsChatProxy — 自定义模型代理",
   "description": "管理 Vs2026ChatProxy 本地代理：状态监控、后台启动、一键配置 VS Code 聊天模型（Custom Endpoint）",
-  "version": "0.2.0",
+  "version": "1.1.3",
   "publisher": "zxxfhh",
   "license": "MIT",
   "icon": "icon.png",
