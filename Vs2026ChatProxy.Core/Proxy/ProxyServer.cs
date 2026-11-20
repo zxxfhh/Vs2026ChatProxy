@@ -154,8 +154,18 @@ namespace Vs2026ChatProxy.Proxy
 
             try
             {
-                var ua = req.Headers["User-Agent"] ?? "(未知)";
-                Log($"→ {method} {path}  [{ua}]");
+                // 客户端 UA 分类显示（Navicat 等第三方 Ollama 客户端可能不带 UA）
+                var ua = req.Headers["User-Agent"];
+                string clientTag;
+                if (string.IsNullOrWhiteSpace(ua))
+                    clientTag = $"{req.RemoteEndPoint?.Address} (无UA)";
+                else if (ua.IndexOf("vscode", StringComparison.OrdinalIgnoreCase) >= 0)
+                    clientTag = "VSCode";
+                else if (ua.IndexOf("visualstudio", StringComparison.OrdinalIgnoreCase) >= 0)
+                    clientTag = "VisualStudio";
+                else
+                    clientTag = ua;
+                Log($"→ {method} {path}  [{clientTag}]");
 
                 // CORS
                 res.Headers.Add("Access-Control-Allow-Origin", "*");
