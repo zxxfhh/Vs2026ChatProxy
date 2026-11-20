@@ -125,6 +125,16 @@ MSBuild Vs2026ChatProxy.sln /p:Configuration=Release
 - 手动配置时模型 ID 从 `/v1/models` 复制（`供应商名:模型ID` 格式）
 - Agent Host 的 BYOK 可能需要实验设置 `chat.agentHost.byokModels.enabled`
 
+## 接入其他 Ollama 兼容客户端（Navicat 等）
+
+任何支持自定义 Ollama 端点的软件都能用本代理。以 **Navicat**（AI 助手）为例（已实测）：
+
+1. Navicat → AI 助手设置 → 模型供应商选 **Ollama / 自定义**
+2. 服务地址填 `http://127.0.0.1:11434`
+3. 模型从列表选择（`供应商名:模型ID` 格式），点测试连接
+
+说明：这类客户端通常走 `GET /api/tags`（模型列表）+ `POST /api/chat`（非流式对话），代理均已兼容；对话响应速度取决于所选模型（思考型模型会先消耗推理 token）。
+
 ---
 
 ## VS Code 插件（vscode-extension/）
