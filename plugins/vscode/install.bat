@@ -9,6 +9,11 @@ echo   VsCodeCopilotProxy VS Code 插件 一键安装
 echo ============================================
 echo.
 
+rem ── remote 参数：跳过本地源，强制从 GitHub 下载最新 Release ──
+set "FORCE_REMOTE="
+if /i "%~1"=="remote" set "FORCE_REMOTE=1"
+if defined FORCE_REMOTE echo 模式: 强制网络安装（跳过本地打包与副本）
+
 rem ── 1. 定位 VS Code 的 code CLI（必须取完整路径，
 rem      否则 code.cmd 内部的 %~dp0 会退化为当前目录）──
 set "CODE_CMD="
@@ -29,13 +34,15 @@ echo [1/3] 找到 VS Code CLI: %CODE_CMD%
 rem ── 2. 选取 vsix。优先级: 源码目录最新打包 ^> GitHub 最新 Release ^> 本目录副本 ──
 set "VSIX="
 set "SRC="
-for /f "delims=" %%f in ('dir /b /o-d "%~dp0..\..\vscode-extension\*.vsix" 2^>nul') do (
-    if not defined VSIX set "VSIX=%~dp0..\..\vscode-extension\%%f"
+if not defined FORCE_REMOTE (
+    for /f "delims=" %%f in ('dir /b /o-d "%~dp0..\..\vscode-extension\*.vsix" 2^>nul') do (
+        if not defined VSIX set "VSIX=%~dp0..\..\vscode-extension\%%f"
+    )
+    if defined VSIX set "SRC=源码目录最新打包" & goto :got_vsix
 )
-if defined VSIX set "SRC=源码目录最新打包" & goto :got_vsix
 
 echo 正在从 GitHub 下载最新 Release ...
-powershell -NoProfile -ExecutionPolicy Bypass -Command "try{Invoke-WebRequest 'https://github.com/zxxfhh/Vs2026ChatProxy/releases/latest/download/VsCodeCopilotProxy.vsix' -OutFile (Join-Path $env:TEMP 'VsCodeCopilotProxy-latest.vsix');exit 0}catch{exit 1}"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$ok=$false; foreach($i in 1..3){ try{ Invoke-WebRequest 'https://github.com/zxxfhh/Vs2026ChatProxy/releases/latest/download/VsCodeCopilotProxy.vsix' -OutFile (Join-Path $env:TEMP 'VsCodeCopilotProxy-latest.vsix'); $ok=$true; break }catch{ Start-Sleep 2 } }; if($ok){exit 0}else{exit 1}"
 if not errorlevel 1 (
     if exist "%TEMP%\VsCodeCopilotProxy-latest.vsix" (
         set "VSIX=%TEMP%\VsCodeCopilotProxy-latest.vsix"
@@ -44,10 +51,12 @@ if not errorlevel 1 (
 )
 if defined VSIX goto :got_vsix
 
-for /f "delims=" %%f in ('dir /b /o-d "%~dp0*.vsix" 2^>nul') do (
-    if not defined VSIX set "VSIX=%~dp0%%f"
+if not defined FORCE_REMOTE (
+    for /f "delims=" %%f in ('dir /b /o-d "%~dp0*.vsix" 2^>nul') do (
+        if not defined VSIX set "VSIX=%~dp0%%f"
+    )
+    if defined VSIX set "SRC=本目录自带副本" & goto :got_vsix
 )
-if defined VSIX set "SRC=本目录自带副本" & goto :got_vsix
 
 echo [错误] 未找到 .vsix 包（源码目录无打包、GitHub 下载失败、本目录无副本）。
 echo        若仓库为私有，Release 下载需要登录权限，请先公开仓库或使用本地构建。
