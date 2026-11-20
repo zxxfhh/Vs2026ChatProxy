@@ -94,6 +94,8 @@ MSBuild Vs2026ChatProxy.sln /p:Configuration=Release
 4. 从列表选择完整模型 ID（格式 `供应商名:模型ID`，如 `my-anthropic:claude-sonnet-4-20250514`）
 5. 进入 Agent (Preview) 使用
 
+**重要：自定义模型只在 Agent (Preview) 模式可用**。在普通"询问 Copilot"聊天线程的模型选择器里，自定义模型显示为灰色（悬浮提示"你自己的模型仅在 Agent (Preview) 中工作"）——这是 VS 的产品规则，不是代理故障。点击输入框旁的 `Agent ▾` 切换模式或新建 Agent 线程即可。
+
 提示：字段名称以当前 VS 界面为准；不要把 VS Code 的 JSON 配置粘贴进 Visual Studio。
 旧版 VS（17.x / 18.10 之前）仍走 Tools → Options → GitHub → Copilot Chat → Add Custom Model → Ollama。
 
