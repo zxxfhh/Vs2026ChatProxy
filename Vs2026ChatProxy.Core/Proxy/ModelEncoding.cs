@@ -21,10 +21,11 @@ namespace Vs2026ChatProxy.Proxy
         }
 
         /// <summary>
-        /// 把 Provider 名净化为 Ollama 标签合法字符（[a-zA-Z0-9._-]）。
-        /// VS 2026 的 Ollama 客户端会校验标签格式：含中文等非 ASCII 字符的模型 ID
-        /// 在管理页正常显示，但在模型选择器中被置灰不可选。
-        /// 例: "智谱Coding" → "Coding"；全非 ASCII 时回退 "provider"。
+        /// 把 Provider 名净化为 Ollama 标签合法字符并转小写。
+        /// VS 2026 的 Ollama 客户端会校验标签格式（Ollama 惯例为全小写
+        /// [a-z0-9._-]）：含中文/大写的模型 ID 在管理页正常显示，
+        /// 但在模型选择器中被置灰不可选。
+        /// 例: "智谱Coding" → "coding"；全非 ASCII 时回退 "provider"。
         /// </summary>
         public static string SanitizeProviderName(string name)
         {
@@ -35,7 +36,7 @@ namespace Vs2026ChatProxy.Proxy
                     || ch == '_' || ch == '-' || ch == '.')
                     sb.Append(ch);
             }
-            var result = sb.ToString().Trim('.');
+            var result = sb.ToString().Trim('.').ToLowerInvariant();
             return result.Length > 0 ? result : "provider";
         }
 

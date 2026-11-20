@@ -229,7 +229,7 @@ namespace Vs2026ChatProxy.Proxy
 
                     case ("/api/show", "POST"):
                         // Ollama 模型详情：VS Code Copilot 只读 model_info[general.architecture + ".context_length"]
-                        await HandleOllamaShowAsync(req, res, config);
+                        await HandleOllamaShowAsync(req, res, config, Log);
                         break;
 
                     case ("/api/ps", "GET"):
@@ -292,7 +292,7 @@ namespace Vs2026ChatProxy.Proxy
         /// VS Code Copilot 通过 model_info[general.architecture + ".context_length"] 读取上下文长度；
         /// 未知模型返回 404，不做伪造。
         /// </summary>
-        private static async Task HandleOllamaShowAsync(HttpListenerRequest req, HttpListenerResponse res, ProxyConfig config)
+        private static async Task HandleOllamaShowAsync(HttpListenerRequest req, HttpListenerResponse res, ProxyConfig config, Action<string>? onLog = null)
         {
             string? modelName = null;
             try
@@ -312,6 +312,7 @@ namespace Vs2026ChatProxy.Proxy
                     var model = provider?.FindModel(modelId);
                     if (provider != null && model != null)
                     {
+                        onLog?.Invoke($"   [api/show] model=\"{modelName}\" → 200 (provider: {provider.Name})");
                         await WriteJsonAsync(res, new
                         {
                             capabilities = new[] { "completion", "tools" },
@@ -324,6 +325,7 @@ namespace Vs2026ChatProxy.Proxy
                 catch (ArgumentException) { /* 编码格式不合法，按未找到处理 */ }
             }
 
+            onLog?.Invoke($"   [api/show] model=\"{modelName ?? ""}\" → 404 未匹配");
             res.StatusCode = 404;
             await WriteJsonAsync(res, new { error = new { code = 404, message = $"model not found: \"{modelName ?? ""}\"" } });
         }
