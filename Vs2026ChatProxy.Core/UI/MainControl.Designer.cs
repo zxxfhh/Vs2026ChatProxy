@@ -23,7 +23,6 @@ namespace Vs2026ChatProxy.UI
         private Button btnClearLog;
 
         // ── 底部：状态栏 + 控制按钮 ──────────────────────
-        private Panel pnlBottom;
         private Label lblStatus;
         private NumericUpDown numPort;
         private Button btnDefaultModel;
@@ -60,7 +59,6 @@ namespace Vs2026ChatProxy.UI
             grpLog = new GroupBox();
             txtLog = new RichTextBox();
             btnClearLog = new Button();
-            pnlBottom = new Panel();
             bottomTlp = new TableLayoutPanel();
             lblStatus = new Label();
             lblPort = new Label();
@@ -79,7 +77,6 @@ namespace Vs2026ChatProxy.UI
             ((System.ComponentModel.ISupportInitialize)dgvProviders).BeginInit();
             pnlProviderButtons.SuspendLayout();
             grpLog.SuspendLayout();
-            pnlBottom.SuspendLayout();
             bottomTlp.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)numPort).BeginInit();
             ((System.ComponentModel.ISupportInitialize)numCompactThreshold).BeginInit();
@@ -87,24 +84,27 @@ namespace Vs2026ChatProxy.UI
             //
             // tlpRoot
             //
+            // 三层 TableLayoutPanel 的单列都用 Percent 100（设计器默认生成的 Absolute 20 不行）：
+            // Dock=Fill 的子面板落在 Absolute 列里时，DPI 缩放后会停在缩放瞬间的宽度，
+            // 不再跟随窗口变宽变窄。
             tlpRoot.ColumnCount = 1;
-            tlpRoot.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 20F));
+            tlpRoot.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
             tlpRoot.Controls.Add(topTlp, 0, 0);
-            tlpRoot.Controls.Add(pnlBottom, 0, 1);
+            tlpRoot.Controls.Add(bottomTlp, 0, 1);
             tlpRoot.Dock = DockStyle.Fill;
             tlpRoot.Location = new Point(0, 0);
             tlpRoot.Name = "tlpRoot";
             tlpRoot.Padding = new Padding(8);
             tlpRoot.RowCount = 2;
             tlpRoot.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
-            tlpRoot.RowStyles.Add(new RowStyle(SizeType.Absolute, 52F));
+            tlpRoot.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             tlpRoot.Size = new Size(933, 643);
             tlpRoot.TabIndex = 0;
             //
             // topTlp
             //
             topTlp.ColumnCount = 1;
-            topTlp.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 20F));
+            topTlp.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
             topTlp.Controls.Add(grpProviders, 0, 0);
             topTlp.Controls.Add(grpLog, 0, 1);
             topTlp.Dock = DockStyle.Fill;
@@ -132,7 +132,7 @@ namespace Vs2026ChatProxy.UI
             // provTlp
             //
             provTlp.ColumnCount = 1;
-            provTlp.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 20F));
+            provTlp.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
             provTlp.Controls.Add(dgvProviders, 0, 0);
             provTlp.Controls.Add(pnlProviderButtons, 0, 1);
             provTlp.Dock = DockStyle.Fill;
@@ -285,29 +285,25 @@ namespace Vs2026ChatProxy.UI
             btnClearLog.UseVisualStyleBackColor = false;
             btnClearLog.Click += btnClearLog_Click;
             //
-            // pnlBottom
-            //
-            pnlBottom.Controls.Add(bottomTlp);
-            pnlBottom.Dock = DockStyle.Fill;
-            pnlBottom.Location = new Point(11, 586);
-            pnlBottom.Name = "pnlBottom";
-            pnlBottom.Padding = new Padding(4, 6, 4, 4);
-            pnlBottom.Size = new Size(911, 46);
-            pnlBottom.TabIndex = 1;
-            //
             // bottomTlp
             //
+            // 底部工具栏：内容自适应（AutoSize 列 + AutoSize 行），不放任何"固定像素"的尺寸。
+            // VS 内的 WinForms 以 PerMonitorV2 运行，高 DPI 下整块控件会被 WinForms 按字体
+            // 比例缩放一次（宽高比例还不一致）；行高、列宽写死，以及贴底停靠的输入框，
+            // 缩放后都会和按钮/标签错开。这里高度取自按钮（AutoSize + 最小高度 30），
+            // 各项用 Anchor=Left 垂直居中。窗口窄于内容时 TableLayoutPanel 会把溢出部分
+            // 两端各裁一半，属正常现象。
             bottomTlp.ColumnCount = 10;
             bottomTlp.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-            bottomTlp.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 42F));
-            bottomTlp.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 65F));
-            bottomTlp.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 42F));
-            bottomTlp.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 180F));
-            bottomTlp.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 75F));
-            bottomTlp.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 55F));
-            bottomTlp.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 20F));
-            bottomTlp.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 130F));
-            bottomTlp.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 130F));
+            bottomTlp.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            bottomTlp.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            bottomTlp.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            bottomTlp.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            bottomTlp.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            bottomTlp.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            bottomTlp.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            bottomTlp.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            bottomTlp.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             bottomTlp.Controls.Add(lblStatus, 0, 0);
             bottomTlp.Controls.Add(lblPort, 1, 0);
             bottomTlp.Controls.Add(numPort, 2, 0);
@@ -318,44 +314,53 @@ namespace Vs2026ChatProxy.UI
             bottomTlp.Controls.Add(lblPercent, 7, 0);
             bottomTlp.Controls.Add(btnGuide, 8, 0);
             bottomTlp.Controls.Add(btnToggleProxy, 9, 0);
-            bottomTlp.Dock = DockStyle.Fill;
-            bottomTlp.Location = new Point(4, 6);
+            bottomTlp.AutoSize = true;
+            bottomTlp.Dock = DockStyle.Top;
+            bottomTlp.Location = new Point(11, 586);
+            bottomTlp.Margin = new Padding(7, 6, 7, 4);
             bottomTlp.Name = "bottomTlp";
-            bottomTlp.RowStyles.Add(new RowStyle(SizeType.Absolute, 20F));
+            bottomTlp.RowCount = 1;
+            bottomTlp.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             bottomTlp.Size = new Size(903, 36);
             bottomTlp.TabIndex = 0;
             //
             // lblStatus
             //
+            // Dock=Fill + AutoEllipsis：占满剩余宽度，窗口窄时省略号截断而不是被裁掉
+            lblStatus.AutoEllipsis = true;
+            lblStatus.Dock = DockStyle.Fill;
             lblStatus.Font = new Font("Microsoft YaHei UI", 10F);
             lblStatus.ForeColor = Color.Gray;
             lblStatus.Location = new Point(3, 0);
             lblStatus.Name = "lblStatus";
-            lblStatus.Size = new Size(100, 23);
+            lblStatus.Size = new Size(100, 36);
             lblStatus.TabIndex = 0;
             lblStatus.Text = "⏹ 未启动";
             lblStatus.TextAlign = ContentAlignment.MiddleLeft;
             //
             // lblPort
             //
-            lblPort.Dock = DockStyle.Fill;
+            lblPort.Anchor = AnchorStyles.Left;
+            lblPort.AutoSize = true;
             lblPort.Font = new Font("Microsoft YaHei UI", 9F);
-            lblPort.Location = new Point(167, 0);
+            lblPort.Location = new Point(167, 10);
+            lblPort.Margin = new Padding(3, 0, 3, 0);
             lblPort.Name = "lblPort";
-            lblPort.Size = new Size(36, 36);
+            lblPort.Size = new Size(36, 17);
             lblPort.TabIndex = 1;
             lblPort.Text = "端口:";
             lblPort.TextAlign = ContentAlignment.MiddleRight;
             //
             // numPort
             //
-            numPort.Dock = DockStyle.Bottom;
+            numPort.Anchor = AnchorStyles.Left;
             numPort.Font = new Font("Microsoft YaHei UI", 9F);
-            numPort.Location = new Point(209, 10);
+            numPort.Location = new Point(209, 7);
             numPort.Maximum = new decimal(new int[] { 65535, 0, 0, 0 });
             numPort.Minimum = new decimal(new int[] { 1024, 0, 0, 0 });
+            numPort.MinimumSize = new Size(66, 0);
             numPort.Name = "numPort";
-            numPort.Size = new Size(59, 23);
+            numPort.Size = new Size(66, 23);
             numPort.TabIndex = 2;
             numPort.TextAlign = HorizontalAlignment.Center;
             numPort.Value = new decimal(new int[] { 11434, 0, 0, 0 });
@@ -363,43 +368,53 @@ namespace Vs2026ChatProxy.UI
             //
             // lblModel
             //
-            lblModel.Dock = DockStyle.Fill;
+            lblModel.Anchor = AnchorStyles.Left;
+            lblModel.AutoSize = true;
             lblModel.Font = new Font("Microsoft YaHei UI", 9F);
-            lblModel.Location = new Point(274, 0);
+            lblModel.Location = new Point(274, 10);
+            lblModel.Margin = new Padding(3, 0, 3, 0);
             lblModel.Name = "lblModel";
-            lblModel.Size = new Size(36, 36);
+            lblModel.Size = new Size(36, 17);
             lblModel.TabIndex = 3;
             lblModel.Text = "模型:";
             lblModel.TextAlign = ContentAlignment.MiddleRight;
             //
             // btnDefaultModel
             //
+            btnDefaultModel.Anchor = AnchorStyles.Left;
+            btnDefaultModel.AutoEllipsis = true;
+            btnDefaultModel.AutoSize = true;
             btnDefaultModel.FlatAppearance.BorderColor = Color.FromArgb(200, 200, 200);
             btnDefaultModel.FlatStyle = FlatStyle.Flat;
             btnDefaultModel.Font = new Font("Microsoft YaHei UI", 9F);
             btnDefaultModel.Location = new Point(316, 3);
+            btnDefaultModel.MaximumSize = new Size(260, 0);
+            btnDefaultModel.MinimumSize = new Size(120, 30);
             btnDefaultModel.Name = "btnDefaultModel";
-            btnDefaultModel.Size = new Size(174, 30);
+            btnDefaultModel.Padding = new Padding(8, 0, 8, 0);
+            btnDefaultModel.Size = new Size(120, 30);
             btnDefaultModel.TabIndex = 4;
             btnDefaultModel.Text = "(未选择)";
             btnDefaultModel.Click += btnDefaultModel_Click;
             //
             // lblThreshold
             //
-            lblThreshold.Dock = DockStyle.Fill;
+            lblThreshold.Anchor = AnchorStyles.Left;
+            lblThreshold.AutoSize = true;
             lblThreshold.Font = new Font("Microsoft YaHei UI", 9F);
-            lblThreshold.Location = new Point(496, 0);
+            lblThreshold.Location = new Point(496, 10);
+            lblThreshold.Margin = new Padding(3, 0, 3, 0);
             lblThreshold.Name = "lblThreshold";
-            lblThreshold.Size = new Size(69, 36);
+            lblThreshold.Size = new Size(63, 17);
             lblThreshold.TabIndex = 5;
             lblThreshold.Text = "压缩阈值:";
             lblThreshold.TextAlign = ContentAlignment.MiddleRight;
             //
             // numCompactThreshold
             //
-            numCompactThreshold.Dock = DockStyle.Bottom;
+            numCompactThreshold.Anchor = AnchorStyles.Left;
             numCompactThreshold.Font = new Font("Microsoft YaHei UI", 9F);
-            numCompactThreshold.Location = new Point(571, 10);
+            numCompactThreshold.Location = new Point(571, 7);
             numCompactThreshold.Maximum = new decimal(new int[] { 99, 0, 0, 0 });
             numCompactThreshold.Minimum = new decimal(new int[] { 10, 0, 0, 0 });
             numCompactThreshold.Name = "numCompactThreshold";
@@ -411,22 +426,28 @@ namespace Vs2026ChatProxy.UI
             //
             // lblPercent
             //
-            lblPercent.Dock = DockStyle.Fill;
+            lblPercent.Anchor = AnchorStyles.Left;
+            lblPercent.AutoSize = true;
             lblPercent.Font = new Font("Microsoft YaHei UI", 9F);
-            lblPercent.Location = new Point(626, 0);
+            lblPercent.Location = new Point(626, 10);
+            lblPercent.Margin = new Padding(0, 0, 3, 0);
             lblPercent.Name = "lblPercent";
-            lblPercent.Size = new Size(14, 36);
+            lblPercent.Size = new Size(11, 17);
             lblPercent.TabIndex = 7;
             lblPercent.Text = "%";
             lblPercent.TextAlign = ContentAlignment.MiddleLeft;
             //
             // btnGuide
             //
+            btnGuide.Anchor = AnchorStyles.Left;
+            btnGuide.AutoSize = true;
             btnGuide.FlatAppearance.BorderColor = Color.FromArgb(200, 200, 200);
             btnGuide.FlatStyle = FlatStyle.Flat;
             btnGuide.Font = new Font("Microsoft YaHei UI", 9F);
             btnGuide.Location = new Point(646, 3);
+            btnGuide.MinimumSize = new Size(120, 30);
             btnGuide.Name = "btnGuide";
+            btnGuide.Padding = new Padding(16, 0, 16, 0);
             btnGuide.Size = new Size(120, 30);
             btnGuide.TabIndex = 8;
             btnGuide.Text = "📋 配置指南";
@@ -434,13 +455,17 @@ namespace Vs2026ChatProxy.UI
             //
             // btnToggleProxy
             //
+            btnToggleProxy.Anchor = AnchorStyles.Left;
+            btnToggleProxy.AutoSize = true;
             btnToggleProxy.BackColor = Color.FromArgb(0, 120, 215);
             btnToggleProxy.FlatAppearance.BorderSize = 0;
             btnToggleProxy.FlatStyle = FlatStyle.Flat;
             btnToggleProxy.Font = new Font("Microsoft YaHei UI", 10F, FontStyle.Bold);
             btnToggleProxy.ForeColor = Color.White;
             btnToggleProxy.Location = new Point(776, 3);
+            btnToggleProxy.MinimumSize = new Size(120, 30);
             btnToggleProxy.Name = "btnToggleProxy";
+            btnToggleProxy.Padding = new Padding(22, 0, 22, 0);
             btnToggleProxy.Size = new Size(120, 30);
             btnToggleProxy.TabIndex = 9;
             btnToggleProxy.Text = "启动代理";
@@ -463,7 +488,6 @@ namespace Vs2026ChatProxy.UI
             ((System.ComponentModel.ISupportInitialize)dgvProviders).EndInit();
             pnlProviderButtons.ResumeLayout(false);
             grpLog.ResumeLayout(false);
-            pnlBottom.ResumeLayout(false);
             bottomTlp.ResumeLayout(false);
             ((System.ComponentModel.ISupportInitialize)numPort).EndInit();
             ((System.ComponentModel.ISupportInitialize)numCompactThreshold).EndInit();
