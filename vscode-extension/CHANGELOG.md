@@ -17,10 +17,19 @@
 
 - 净化名转小写（Ollama 命名惯例，修复 VS 选择器仍置灰）
 
+## 1.1.6
+
+- **修复选不到模型**：VS Code 新版（实测 1.146）不再按地址自动发现「自定义端点」的模型，旧的 `{ name, vendor, apiType, url }` 条目会让供应商出现却没有模型。「把模型写入 VS Code 聊天模型」改为读代理的模型列表后逐条写入（`models[]`），并去掉顶层 `url`
+- 代理一运行就自动核对 VS Code 聊天模型配置：没写过、是旧格式、地址或模型列表变了，都会提示一键写入；配置变更导致代理重启后也会核对
+- **修复「启动代理」误报没有供应商**：代理窗口保存的配置键名是大写开头（`Port` / `Providers`），之前被读成 0 个供应商
+- 「启动代理」「停止代理」合并为一个「启动/停止代理」；插件打开的代理窗口随之关闭
+- 模型列表视图：代理没运行时显示可点击的「启动」行，而不是笼统的「无模型」；状态栏悬停显示配置文件路径
+- 插件默认使用自己的配置文件（不再自动改用 VS 2026 插件那一份）；新增 `vschatproxy.maxOutputTokens` / `vschatproxy.maxInputTokens`
+
 ## 1.1.5
 
 - **插件内置代理程序**：不再要求配置 `vschatproxy.executablePath`，安装后即可从状态栏启动
 - 新增命令「打开代理窗口」：打开代理自带的设置界面，添加/修改供应商、查看日志
-- 默认与 VS 2026 插件共用同一份配置（`LocalAppData\VsCopilotProxy\proxy-config.json`），两边供应商保持一致；可用 `vschatproxy.configPath` 指定其他文件
+- 曾默认与 VS 2026 插件共用配置（`LocalAppData\VsCopilotProxy\proxy-config.json`）；1.1.6 起改为插件自己的配置，需要共用时用 `vschatproxy.configPath`
 - 后台代理随配置文件修改自动重启；VS Code 扩展宿主退出后后台代理自行退出，不留残余进程占端口
 - 启动时自动对齐配置文件里的端口与 `baseUrl`

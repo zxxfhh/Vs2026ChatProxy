@@ -48,18 +48,12 @@ test('resolveProxyExe: 设置优先，其次内置，都没有时给出说明', 
     assert.match(broken.problem, /不存在/);
 });
 
-test('resolveProxyConfigPath: 设置 > 旧版自有配置 > 共用配置 > 自有目录', () => {
+test('resolveProxyConfigPath: 设置了就用设置的，否则是插件自己的 globalStorage 配置', () => {
     const dir = tempDir();
     const storage = path.join(dir, 'storage');
     const own = path.join(storage, 'proxy-config.json');
-    const shared = info.sharedConfigPath();
-
-    assert.equal(info.resolveProxyConfigPath('', storage), shared ?? own);
-    if (shared) {
-        write(own, '{}');
-        assert.equal(info.resolveProxyConfigPath('', storage), own);
-    }
-    assert.equal(info.resolveProxyConfigPath('  ', storage), fs.existsSync(own) ? own : (shared ?? own));
+    assert.equal(info.resolveProxyConfigPath('', storage), own);
+    assert.equal(info.resolveProxyConfigPath('  ', storage), own);
     assert.equal(info.resolveProxyConfigPath(path.join(dir, 'custom.json'), storage), path.join(dir, 'custom.json'));
     assert.equal(info.resolveProxyConfigPath(`~${path.sep}cfg${path.sep}p.json`, storage),
         path.join(os.homedir(), 'cfg', 'p.json'));
@@ -71,6 +65,11 @@ test('readProxyConfig: 文件不存在 / 供应商数量 / 非法 JSON', () => {
 
     const ok = write(path.join(dir, 'ok.json'), JSON.stringify({ port: 12345, host: '127.0.0.1', providers: [{}, {}] }));
     assert.deepEqual(info.readProxyConfig(ok), { port: 12345, host: '127.0.0.1', providerCount: 2 });
+
+    // 代理窗口保存出来的文件是 PascalCase 键名
+    const pascal = write(path.join(dir, 'pascal.json'),
+        JSON.stringify({ Port: 11434, Host: '127.0.0.1', Providers: [{ Name: 'p', Models: [{ Id: 'm' }] }], CompactThresholdPercent: 85 }));
+    assert.deepEqual(info.readProxyConfig(pascal), { port: 11434, host: '127.0.0.1', providerCount: 1 });
 
     const empty = write(path.join(dir, 'empty.json'), JSON.stringify({ providers: [] }));
     assert.equal(info.readProxyConfig(empty).providerCount, 0);

@@ -101,37 +101,40 @@ MSBuild Vs2026ChatProxy.sln /p:Configuration=Release
 
 ## 接入 VS Code
 
-方式一（推荐）：安装本项目 VS Code 插件（见下节，插件内置代理程序，无需单独下载 exe）。点状态栏的 `代理(停)`，依次：
+VS Code 自己不知道代理里有哪些模型，需要两份东西：**代理在运行**，以及 VS Code 的聊天模型配置（`%APPDATA%\Code\User\chatLanguageModels.json`）里**逐条列出**这些模型。新版 VS Code（实测 1.146）不再按地址自动发现「自定义端点」的模型。
 
-1. **打开代理窗口** → 在代理自带的界面里添加供应商
-2. **启动代理（后台运行）**
-3. 执行命令 `VsChatProxy: 配置 VS Code 聊天模型` 一键写入
+方式一（推荐）：安装本项目 VS Code 插件（内置代理程序，见下节）。
 
-如果已经装了 VS 2026 插件并配置过供应商，VS Code 插件默认共用同一份配置，第 1 步可以跳过。
+1. 点状态栏的 `代理(停)` → **启动代理**（还没添加供应商就先点「打开代理窗口」）
+2. 代理一运行，插件会提示「把它们写入 VS Code 的聊天模型…」→ 点 **立即写入**（也可以随时执行 `VsChatProxy: 把模型写入 VS Code 聊天模型`）
+3. 回到 Chat 的模型选择器，在 `VsChatProxy` 下选模型；没出现就重新加载窗口
 
-方式二（手动）：
-
-1. 命令面板 → `Chat: Manage Language Models` → **Add Models → Custom Endpoint → Chat Completions**
-2. 基地址填 `http://127.0.0.1:11434/v1`
-
-或直接编辑 `chatLanguageModels.json`（Windows: `%APPDATA%\Code\User\`）：
+方式二（手动）：编辑 `chatLanguageModels.json`，在数组里加一个「自定义端点」供应商，每个模型一条：
 
 ```json
-[
-  {
-    "name": "VsChatProxy",
-    "vendor": "customendpoint",
-    "apiType": "chat-completions",
-    "url": "http://127.0.0.1:11434/v1"
-  }
-]
+{
+  "name": "VsChatProxy",
+  "vendor": "customendpoint",
+  "apiType": "chat-completions",
+  "models": [
+    {
+      "id": "my-deepseek:deepseek-chat",
+      "name": "my-deepseek:deepseek-chat",
+      "url": "http://127.0.0.1:11434/v1",
+      "toolCalling": true,
+      "vision": false,
+      "maxInputTokens": 122880,
+      "maxOutputTokens": 8192
+    }
+  ]
+}
 ```
 
-说明：
-
-- 供应商 Key 只配置在代理端；VS Code 若强制要求 Key，可填任意占位文本
-- 手动配置时模型 ID 从 `/v1/models` 复制（`供应商名:模型ID` 格式）
-- Agent Host 的 BYOK 可能需要实验设置 `chat.agentHost.byokModels.enabled`
+- `id`：`/v1/models` 返回的模型 ID（去掉末尾的上下文标签，如 ` [128K]`）；VS Code 发请求时原样作为 `model` 传给代理
+- `maxOutputTokens`：VS Code 会把它作为 `max_tokens` 发给代理，`8192` 是各家兼容接口都接受的上限
+- **不要写顶层 `url`**（`{ "name", "vendor", "apiType", "url" }` 这种旧写法）：VS Code 看到它会改走「自动发现」，而那条路径对自定义端点不产出任何模型，表现就是供应商在、却选不到模型
+- API Key 不用填：代理不校验鉴权；该字段在 VS Code 里是机密字段，直接写明文也不生效
+- 保存后 VS Code 会自动刷新；没出现就重新加载窗口
 
 ## 接入其他 Ollama 兼容客户端（Navicat 等）
 
@@ -155,22 +158,28 @@ VS 的 Ollama 客户端会校验模型标签格式（仅允许 `[a-zA-Z0-9._:-]`
 
 点状态栏的 `代理(停)` 弹出菜单（命令相同）：
 
+- `VsChatProxy: 启动/停止代理` —— 一个按钮：没在运行就后台启动，在运行就停止（插件打开的代理窗口也一并关闭）；配置文件改动后自动重启生效
 - `VsChatProxy: 打开代理窗口（配置供应商）` —— 代理自带的设置界面：添加/修改供应商、查看日志
-- `VsChatProxy: 启动代理（后台运行）` —— 后台拉起内置代理；配置文件改动后自动重启生效
-- `VsChatProxy: 停止代理` —— 结束插件自己拉起的进程
-- `VsChatProxy: 配置 VS Code 聊天模型` —— 备份后自动写入 `chatLanguageModels.json`
-- `VsChatProxy: 查看模型列表` —— 树视图展示 `/v1/models`，点击复制完整 ID
+- `VsChatProxy: 把模型写入 VS Code 聊天模型` —— 读代理的 `/v1/models`，备份后逐条写入 `chatLanguageModels.json`（见上一节）。代理一运行，插件会自动核对并在需要时提示写入
+- `VsChatProxy: 查看模型列表` —— 侧边栏树视图展示 `/v1/models`，点击复制完整 ID
 - `VsChatProxy: 打开配置文件`、`VsChatProxy: 检查更新`
 
-配置文件默认**与 VS 2026 插件共用**（`%LocalAppData%\VsCopilotProxy\proxy-config.json`），两边的供应商和端口保持一致。诊断信息（代理程序位置、配置路径、启停记录）在输出面板的 `VsChatProxy` 频道。
+两份配置不要混淆：
+
+| 文件 | 谁在用 | 位置 |
+|---|---|---|
+| `proxy-config.json` | 代理：供应商、Key、端口 | 插件自己的目录（代理窗口里添加的供应商保存在这里；路径见状态栏悬停提示或输出面板 `VsChatProxy`）。VS 2026 插件用的是另一份 `%LocalAppData%\VsCopilotProxy\proxy-config.json`，想两边共用就把 `vschatproxy.configPath` 指过去 |
+| `chatLanguageModels.json` | VS Code：有哪些聊天模型可选 | `%APPDATA%\Code\User\`，由插件「把模型写入 VS Code 聊天模型」维护 |
 
 设置项：
 
 | 设置 | 默认值 | 说明 |
 |---|---|---|
 | `vschatproxy.baseUrl` | `http://127.0.0.1:11434` | 代理地址（启动时自动与配置文件里的端口对齐） |
-| `vschatproxy.configPath` | （空） | 配置文件路径；留空用上面的共用文件 |
+| `vschatproxy.configPath` | （空） | 代理配置文件路径；留空用插件自己的那份 |
 | `vschatproxy.executablePath` | （空） | 可选：改用自己编译或别处的 exe（留空用内置的） |
+| `vschatproxy.maxOutputTokens` | `8192` | 写入 VS Code 模型配置的最大输出 token（VS Code 作为 `max_tokens` 发给代理） |
+| `vschatproxy.maxInputTokens` | `128000` | 代理没有广播模型上下文长度时用的最大输入 token |
 | `vschatproxy.autoStart` | `false` | VS Code 启动时自动后台拉起代理（配置里已有供应商时） |
 | `vschatproxy.autoUpdate` | `true` | 启动时检查 GitHub 新版本并提示更新 |
 

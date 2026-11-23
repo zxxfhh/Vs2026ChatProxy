@@ -9,3 +9,7 @@ out/**/*.ts
 **/*.ts
 **/*.map
 **/*.pdb
+# 代理在本目录运行时会生成的配置（含 API Key）与日志，绝不能进包
+proxy-config.json
+proxy_*.log
+*.log

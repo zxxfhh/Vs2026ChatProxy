@@ -2,3 +2,6 @@ node_modules/
 out/
 proxy/
 *.vsix
+# 代理在当前目录运行时可能生成的配置与日志（含 API Key，切勿入库）
+proxy-config.json
+proxy_*.log

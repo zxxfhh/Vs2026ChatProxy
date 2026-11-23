@@ -1,8 +1,8 @@
 {
   "name": "vs2026-chat-proxy",
   "displayName": "VsChatProxy — 自定义模型代理",
-  "description": "内置代理程序，装完即用：状态栏启停、代理窗口配置供应商、一键配置 VS Code 聊天模型（Custom Endpoint）",
-  "version": "1.1.5",
+  "description": "内置代理程序，装完即用：状态栏启停、代理窗口配置供应商、把代理的模型一键写入 VS Code 聊天模型（Custom Endpoint）",
+  "version": "1.1.6",
   "publisher": "zxxfhh",
   "license": "MIT",
   "icon": "icon.png",
@@ -22,13 +22,8 @@
   "contributes": {
     "commands": [
       {
-        "command": "vschatproxy.start",
-        "title": "启动代理（后台运行）",
-        "category": "VsChatProxy"
-      },
-      {
-        "command": "vschatproxy.stop",
-        "title": "停止代理",
+        "command": "vschatproxy.toggle",
+        "title": "启动/停止代理",
         "category": "VsChatProxy"
       },
       {
@@ -38,7 +33,7 @@
       },
       {
         "command": "vschatproxy.configureChatModels",
-        "title": "配置 VS Code 聊天模型",
+        "title": "把代理的模型写入 VS Code 聊天模型",
         "category": "VsChatProxy"
       },
       {
@@ -83,7 +78,7 @@
     "viewsWelcome": [
       {
         "view": "vschatproxy.models",
-        "contents": "代理未运行或还没有供应商。\n[启动代理](command:vschatproxy.start) · [打开代理窗口配置供应商](command:vschatproxy.openWindow)"
+        "contents": "代理没在运行。\n[启动/停止代理](command:vschatproxy.toggle) · [打开代理窗口配置供应商](command:vschatproxy.openWindow)\n模型要出现在 Chat 的模型选择器里，还需执行「把模型写入 VS Code 聊天模型」。"
       }
     ],
     "menus": {
@@ -106,7 +101,7 @@
         "vschatproxy.configPath": {
           "type": "string",
           "default": "",
-          "description": "代理配置文件（proxy-config.json）路径。留空时：Windows 下与 VS 2026 插件共用同一份配置（用户目录 LocalAppData\\VsCopilotProxy\\proxy-config.json）"
+          "description": "代理配置文件（proxy-config.json）路径。留空时用插件自己的配置（代理窗口里添加的供应商保存在这里，路径见状态栏悬停提示或输出面板 VsChatProxy）。VS 2026 插件用的是另一份，想两边共用就把它指过去"
         },
         "vschatproxy.executablePath": {
           "type": "string",
@@ -117,6 +112,18 @@
           "type": "boolean",
           "default": false,
           "description": "VS Code 启动时代理未运行则自动后台拉起（配置里已有供应商时）"
+        },
+        "vschatproxy.maxOutputTokens": {
+          "type": "number",
+          "default": 8192,
+          "minimum": 256,
+          "description": "写入 VS Code 模型配置的最大输出 token 数。VS Code 会把它作为 max_tokens 发给代理，8192 是各家兼容接口都接受的上限"
+        },
+        "vschatproxy.maxInputTokens": {
+          "type": "number",
+          "default": 128000,
+          "minimum": 4096,
+          "description": "代理没有广播模型上下文长度时，写入 VS Code 模型配置的最大输入 token 数"
         },
         "vschatproxy.autoUpdate": {
           "type": "boolean",
@@ -132,7 +139,7 @@
     "watch": "tsc -watch -p ./",
     "proxy:sync": "node scripts/sync-proxy.js",
     "package": "npx vsce package --allow-missing-repository --out VsCodeCopilotProxy.vsix",
-    "test": "node --test test/proxyInfo.test.js"
+    "test": "node --test test/proxyInfo.test.js test/chatProvider.test.js"
   },
   "devDependencies": {
     "@types/node": "^20.14.0",

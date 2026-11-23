@@ -40,25 +40,17 @@ export function resolveProxyExe(configured: string, extensionPath: string): { ex
         : { problem: '插件包里没有内置的代理程序（proxy/Vs2026ChatProxy.exe），请重新安装插件，或在设置里指定 vschatproxy.executablePath' };
 }
 
-/** 与 VS 2026 插件共用的配置文件（非 Windows 返回 undefined） */
-export function sharedConfigPath(): string | undefined {
-    if (process.platform !== 'win32') return undefined;
-    const base = process.env.LOCALAPPDATA ?? path.join(os.homedir(), 'AppData', 'Local');
-    return path.join(base, 'VsCopilotProxy', 'proxy-config.json');
-}
-
 /**
- * 配置文件位置：设置 configPath → 旧版插件自己的 globalStorage 配置（若存在，保持兼容）
- * → 与 VS 2026 插件共用的文件 → globalStorage。
+ * 配置文件位置：设置 configPath，否则用插件自己的配置（globalStorage/proxy-config.json）。
+ * VS 2026 插件用的是另一份（LocalAppData\VsCopilotProxy\proxy-config.json）；想两边共用就把
+ * configPath 指过去。代理窗口里添加的供应商保存在这里。
  */
 export function resolveProxyConfigPath(configured: string, storageDir: string): string {
     const custom = configured.trim();
     if (custom) {
         return path.resolve(custom.replace(/^~(?=$|[\\/])/, os.homedir()));
     }
-    const own = path.join(storageDir, 'proxy-config.json');
-    if (fs.existsSync(own)) return own;
-    return sharedConfigPath() ?? own;
+    return path.join(storageDir, 'proxy-config.json');
 }
 
 export interface ProxyConfigSummary {
@@ -69,16 +61,26 @@ export interface ProxyConfigSummary {
     error?: string;
 }
 
+/**
+ * 配置文件的键名大小写不敏感：代理窗口保存出来的是 PascalCase（Port / Providers / Models），
+ * 手写文件和插件生成的模板是 camelCase（port / providers）。
+ */
+function pick(raw: Record<string, unknown>, camelKey: string): unknown {
+    return raw[camelKey] ?? raw[camelKey[0].toUpperCase() + camelKey.slice(1)];
+}
+
 /** 读取配置里的端口/供应商数量；文件不存在返回 undefined */
 export function readProxyConfig(configPath: string): ProxyConfigSummary | undefined {
     if (!fs.existsSync(configPath)) return undefined;
     try {
-        const raw = JSON.parse(fs.readFileSync(configPath, 'utf-8')) as { port?: unknown; host?: unknown; providers?: unknown };
-        const providers = Array.isArray(raw.providers) ? raw.providers : [];
+        const raw = JSON.parse(fs.readFileSync(configPath, 'utf-8')) as Record<string, unknown>;
+        const providers = pick(raw, 'providers');
+        const port = pick(raw, 'port');
+        const host = pick(raw, 'host');
         return {
-            port: typeof raw.port === 'number' ? raw.port : undefined,
-            host: typeof raw.host === 'string' ? raw.host : undefined,
-            providerCount: providers.length,
+            port: typeof port === 'number' ? port : undefined,
+            host: typeof host === 'string' ? host : undefined,
+            providerCount: Array.isArray(providers) ? providers.length : 0,
         };
     } catch (err) {
         return { providerCount: 0, error: err instanceof Error ? err.message : String(err) };
