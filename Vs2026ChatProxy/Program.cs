@@ -34,6 +34,15 @@ namespace Vs2026ChatProxy
             if (!File.Exists(configPath) && File.Exists("proxy-config.example.json"))
                 File.Copy("proxy-config.example.json", configPath);
 
+            // 没指定 --config、当前目录也没有配置时，用 exe 旁边的而不是在当前目录新建：
+            // 从别的目录启动（比如在源码目录里的终端）否则会在那里悄悄留下一份带 Key 的配置。
+            if (!File.Exists(configPath) && configPath == "proxy-config.json")
+            {
+                var besideExe = Path.Combine(AppContext.BaseDirectory, "proxy-config.json");
+                if (File.Exists(besideExe))
+                    configPath = besideExe;
+            }
+
             // --headless：无窗口后台模式（供 VS Code 插件等外部宿主拉起）
             if (HasArg(args, "--headless"))
             {

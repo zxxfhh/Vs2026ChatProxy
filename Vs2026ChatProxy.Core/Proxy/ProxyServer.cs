@@ -14,7 +14,7 @@ namespace Vs2026ChatProxy.Proxy
     public class ProxyServer
     {
         /// <summary>代理自身版本（/api/version 返回值），随发布版本一起改（package.json / vsixmanifest / git tag 同号）</summary>
-        public const string ProxyVersion = "1.1.5";
+        public const string ProxyVersion = "1.1.6";
 
         private HttpListener? _listener;
         private CancellationTokenSource? _cts;
