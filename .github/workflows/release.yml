@@ -21,6 +21,7 @@ jobs:
         run: msbuild Vs2026ChatProxy.sln /p:Configuration=Release /restore /m /v:m
 
       # ── 构建 VS Code 插件 vsix（固定文件名，不带版本号）──
+      # 插件内置代理程序：先把上一步生成的独立 exe 产物同步进 vscode-extension/proxy/ 再打包
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -29,9 +30,11 @@ jobs:
         run: |
           npm ci
           npm run compile
+          npm test
+          npm run proxy:sync
           npx vsce package --allow-missing-repository --out VsCodeCopilotProxy.vsix
 
-      # ── 独立 exe 打包（VS Code 插件后台拉起代理用）──
+      # ── 独立 exe 打包（单独使用代理窗口时下载）──
       - name: Zip standalone exe
         shell: pwsh
         run: |

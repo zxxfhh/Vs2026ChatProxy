@@ -101,7 +101,13 @@ MSBuild Vs2026ChatProxy.sln /p:Configuration=Release
 
 ## 接入 VS Code
 
-方式一（推荐）：安装本项目 VS Code 插件（见下节），执行命令 `VsChatProxy: 配置 VS Code 聊天模型` 一键写入。
+方式一（推荐）：安装本项目 VS Code 插件（见下节，插件内置代理程序，无需单独下载 exe）。点状态栏的 `代理(停)`，依次：
+
+1. **打开代理窗口** → 在代理自带的界面里添加供应商
+2. **启动代理（后台运行）**
+3. 执行命令 `VsChatProxy: 配置 VS Code 聊天模型` 一键写入
+
+如果已经装了 VS 2026 插件并配置过供应商，VS Code 插件默认共用同一份配置，第 1 步可以跳过。
 
 方式二（手动）：
 
@@ -145,29 +151,36 @@ VS 的 Ollama 客户端会校验模型标签格式（仅允许 `[a-zA-Z0-9._:-]`
 
 ## VS Code 插件（vscode-extension/）
 
-```
-cd vscode-extension
-npm install
-npm run compile
-npx vsce package    # 产出 .vsix，VS Code 中 "Install from VSIX" 安装
-```
+插件**内置代理程序**（`Vs2026ChatProxy.exe` 及其依赖随插件打包），安装后不需要再单独下载 exe 或配置路径。
 
-功能：
+点状态栏的 `代理(停)` 弹出菜单（命令相同）：
 
-- **状态栏**：轮询 `/health` 显示代理运行状态
-- `VsChatProxy: 启动代理` —— 后台拉起独立 exe（`--headless` 模式，需要 `vschatproxy.executablePath` 设置）
+- `VsChatProxy: 打开代理窗口（配置供应商）` —— 代理自带的设置界面：添加/修改供应商、查看日志
+- `VsChatProxy: 启动代理（后台运行）` —— 后台拉起内置代理；配置文件改动后自动重启生效
 - `VsChatProxy: 停止代理` —— 结束插件自己拉起的进程
 - `VsChatProxy: 配置 VS Code 聊天模型` —— 备份后自动写入 `chatLanguageModels.json`
 - `VsChatProxy: 查看模型列表` —— 树视图展示 `/v1/models`，点击复制完整 ID
-- `VsChatProxy: 打开配置文件`
+- `VsChatProxy: 打开配置文件`、`VsChatProxy: 检查更新`
+
+配置文件默认**与 VS 2026 插件共用**（`%LocalAppData%\VsCopilotProxy\proxy-config.json`），两边的供应商和端口保持一致。诊断信息（代理程序位置、配置路径、启停记录）在输出面板的 `VsChatProxy` 频道。
 
 设置项：
 
 | 设置 | 默认值 | 说明 |
 |---|---|---|
-| `vschatproxy.baseUrl` | `http://127.0.0.1:11434` | 代理地址 |
-| `vschatproxy.executablePath` | （空） | 独立 exe 路径（启动代理用） |
-| `vschatproxy.autoStart` | `false` | VS Code 启动时自动拉起代理 |
+| `vschatproxy.baseUrl` | `http://127.0.0.1:11434` | 代理地址（启动时自动与配置文件里的端口对齐） |
+| `vschatproxy.configPath` | （空） | 配置文件路径；留空用上面的共用文件 |
+| `vschatproxy.executablePath` | （空） | 可选：改用自己编译或别处的 exe（留空用内置的） |
+| `vschatproxy.autoStart` | `false` | VS Code 启动时自动后台拉起代理（配置里已有供应商时） |
+| `vschatproxy.autoUpdate` | `true` | 启动时检查 GitHub 新版本并提示更新 |
+
+打包（先用 VS 的 MSBuild 以 Release 生成整个解决方案，得到独立 exe 的产物）：
+
+```
+cd vscode-extension
+npm install
+npm run package     # 编译 + 把 exe 产物同步进 proxy/ + vsce package
+```
 
 ---
 

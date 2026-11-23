@@ -1,8 +1,8 @@
 {
   "name": "vs2026-chat-proxy",
   "displayName": "VsChatProxy — 自定义模型代理",
-  "description": "管理 Vs2026ChatProxy 本地代理：状态监控、后台启动、一键配置 VS Code 聊天模型（Custom Endpoint）",
-  "version": "1.1.4",
+  "description": "内置代理程序，装完即用：状态栏启停、代理窗口配置供应商、一键配置 VS Code 聊天模型（Custom Endpoint）",
+  "version": "1.1.5",
   "publisher": "zxxfhh",
   "license": "MIT",
   "icon": "icon.png",
@@ -23,12 +23,17 @@
     "commands": [
       {
         "command": "vschatproxy.start",
-        "title": "启动代理",
+        "title": "启动代理（后台运行）",
         "category": "VsChatProxy"
       },
       {
         "command": "vschatproxy.stop",
         "title": "停止代理",
+        "category": "VsChatProxy"
+      },
+      {
+        "command": "vschatproxy.openWindow",
+        "title": "打开代理窗口（配置供应商）",
         "category": "VsChatProxy"
       },
       {
@@ -75,6 +80,12 @@
         }
       ]
     },
+    "viewsWelcome": [
+      {
+        "view": "vschatproxy.models",
+        "contents": "代理未运行或还没有供应商。\n[启动代理](command:vschatproxy.start) · [打开代理窗口配置供应商](command:vschatproxy.openWindow)"
+      }
+    ],
     "menus": {
       "view/title": [
         {
@@ -90,17 +101,22 @@
         "vschatproxy.baseUrl": {
           "type": "string",
           "default": "http://127.0.0.1:11434",
-          "description": "代理服务地址（不含 /v1 后缀）"
+          "description": "代理服务地址（不含 /v1 后缀）。启动时会自动与代理配置文件里的端口保持一致"
+        },
+        "vschatproxy.configPath": {
+          "type": "string",
+          "default": "",
+          "description": "代理配置文件（proxy-config.json）路径。留空时：Windows 下与 VS 2026 插件共用同一份配置（用户目录 LocalAppData\\VsCopilotProxy\\proxy-config.json）"
         },
         "vschatproxy.executablePath": {
           "type": "string",
           "default": "",
-          "description": "Vs2026ChatProxy.exe 独立程序路径（「启动代理」命令需要）"
+          "description": "可选：改用自己编译或别处的 Vs2026ChatProxy.exe。留空则使用插件内置的代理程序"
         },
         "vschatproxy.autoStart": {
           "type": "boolean",
           "default": false,
-          "description": "VS Code 启动时代理未运行则自动拉起（需要配置 executablePath）"
+          "description": "VS Code 启动时代理未运行则自动后台拉起（配置里已有供应商时）"
         },
         "vschatproxy.autoUpdate": {
           "type": "boolean",
@@ -111,9 +127,12 @@
     }
   },
   "scripts": {
-    "vscode:prepublish": "npm run compile",
+    "vscode:prepublish": "npm run compile && npm run proxy:sync",
     "compile": "tsc -p ./",
-    "watch": "tsc -watch -p ./"
+    "watch": "tsc -watch -p ./",
+    "proxy:sync": "node scripts/sync-proxy.js",
+    "package": "npx vsce package --allow-missing-repository --out VsCodeCopilotProxy.vsix",
+    "test": "node --test test/proxyInfo.test.js"
   },
   "devDependencies": {
     "@types/node": "^20.14.0",

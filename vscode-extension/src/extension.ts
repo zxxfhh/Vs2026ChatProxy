@@ -3,17 +3,47 @@ import * as cp from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import {
+    DEFAULT_PORT,
+    ProxyConfigSummary,
+    lastLogLines,
+    normalizeBaseUrl,
+    portOf,
+    readProxyConfig,
+    resolveProxyConfigPath,
+    resolveProxyExe,
+} from './proxyInfo';
 
 let statusBarItem: vscode.StatusBarItem;
+let output: vscode.OutputChannel;
 let pollTimer: ReturnType<typeof setInterval> | undefined;
-let ownedChild: cp.ChildProcess | undefined;
+/** 插件拉起的进程。headless = 后台代理（随插件停止）；gui = 代理窗口（留给用户自己关） */
+let ownedChild: { proc: cp.ChildProcess; kind: 'headless' | 'gui' } | undefined;
 let modelsProvider: ModelsTreeProvider | undefined;
+let configWatcher: vscode.FileSystemWatcher | undefined;
+let configWatcherTimer: ReturnType<typeof setTimeout> | undefined;
+/** 正在拉起代理（防止连点导致并发启动多个进程） */
+let starting = false;
 
 const HEALTH_POLL_MS = 10_000;
 const FETCH_TIMEOUT_MS = 2_500;
+const START_WAIT_ROUNDS = 30;
+const START_WAIT_MS = 500;
+const CONFIG_RESTART_DELAY_MS = 800;
+
+/** 写入 chatLanguageModels.json 的供应商条目名 */
+const CHAT_PROVIDER_NAME = 'VsChatProxy';
 
 /** 自动更新：从本仓库 GitHub Releases 拉取最新 vsix */
 const GITHUB_REPO = 'zxxfhh/Vs2026ChatProxy';
+
+const MENU_START = '$(play) 启动代理（后台运行）';
+const MENU_WINDOW = '$(window) 打开代理窗口（添加/修改供应商）';
+const MENU_STOP = '$(debug-stop) 停止代理';
+const MENU_CONFIGURE = '$(settings-gear) 配置 VS Code 聊天模型';
+const MENU_MODELS = '$(list-unordered) 查看模型列表';
+const MENU_OPEN_CONFIG = '$(go-to-file) 打开配置文件';
+const MENU_UPDATE = '$(cloud-download) 检查更新';
 
 interface GithubRelease {
     tag_name?: string;
@@ -26,14 +56,16 @@ function getConfig(): vscode.WorkspaceConfiguration {
     return vscode.workspace.getConfiguration('vschatproxy');
 }
 
-/** 规范化 baseUrl：去掉末尾斜杠与 /v1 后缀 */
 function getBaseUrl(): string {
-    const raw = (getConfig().get<string>('baseUrl') ?? 'http://127.0.0.1:11434').trim();
-    let url = raw.replace(/\/+$/, '');
-    if (url.endsWith('/v1')) {
-        url = url.slice(0, -3).replace(/\/+$/, '');
-    }
-    return url || 'http://127.0.0.1:11434';
+    return normalizeBaseUrl(getConfig().get<string>('baseUrl') ?? '');
+}
+
+function log(message: string): void {
+    output?.appendLine(`[${new Date().toLocaleTimeString()}] ${message}`);
+}
+
+function sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function fetchJson<T>(url: string, timeoutMs = FETCH_TIMEOUT_MS): Promise<T> {
@@ -76,19 +108,13 @@ function chatModelsFilePath(): string {
     return path.join(os.homedir(), '.config', 'Code', 'User', 'chatLanguageModels.json');
 }
 
-/** 插件专用代理配置文件路径（globalStorage/proxy-config.json） */
-async function proxyConfigPath(context: vscode.ExtensionContext): Promise<string> {
-    const dir = context.globalStorageUri.fsPath;
-    await fs.promises.mkdir(dir, { recursive: true });
-    return path.join(dir, 'proxy-config.json');
+function chatProviderUrl(): string {
+    return `${getBaseUrl()}/v1`;
 }
 
-/** 首次运行时写入默认配置模板（含一个示例供应商，需自行改 Key） */
-async function ensureProxyConfig(configPath: string, port: number): Promise<void> {
-    if (fs.existsSync(configPath)) {
-        return;
-    }
-    const template = {
+/** 空白配置模板（含一个示例供应商，需自行改 Key） */
+function templateConfig(port: number): object {
+    return {
         port,
         host: '127.0.0.1',
         compactThresholdPercent: 85,
@@ -103,87 +129,321 @@ async function ensureProxyConfig(configPath: string, port: number): Promise<void
             },
         ],
     };
-    await fs.promises.writeFile(configPath, JSON.stringify(template, null, 2), 'utf-8');
+}
+
+// ── 进程管理 ──────────────────────────────────────────────
+
+function trackChild(child: cp.ChildProcess, kind: 'headless' | 'gui'): void {
+    ownedChild = { proc: child, kind };
+    child.once('exit', () => {
+        log(`代理进程已退出（${kind}）`);
+        if (ownedChild?.proc === child) {
+            ownedChild = undefined;
+            if (kind === 'headless') {
+                stopWatchingConfig();
+            }
+        }
+    });
+    child.once('error', (err) => {
+        log(`代理进程错误: ${err.message}`);
+        void vscode.window.showErrorMessage(`代理程序无法启动: ${err.message}`);
+    });
+}
+
+/** 结束插件自己拉起的进程；返回是否确实结束了 */
+function killOwnedChild(): boolean {
+    const owned = ownedChild;
+    if (!owned) return false;
+    ownedChild = undefined; // 先摘掉，exit 回调里不再改状态
+    owned.proc.kill();
+    if (owned.kind === 'headless') {
+        stopWatchingConfig();
+    }
+    log(`已结束代理进程（${owned.kind}）`);
+    return true;
+}
+
+function stopWatchingConfig(): void {
+    if (configWatcherTimer) {
+        clearTimeout(configWatcherTimer);
+        configWatcherTimer = undefined;
+    }
+    configWatcher?.dispose();
+    configWatcher = undefined;
+}
+
+/** 结束进程后等 /health 真正下线（进程被结束后端口释放有几十毫秒延迟） */
+async function waitUntilStopped(): Promise<void> {
+    for (let i = 0; i < 10 && (await checkHealth()); i++) {
+        await sleep(200);
+    }
+}
+
+/** 防抖后按最新配置重启后台代理 */
+function scheduleConfigRestart(context: vscode.ExtensionContext): void {
+    if (configWatcherTimer) clearTimeout(configWatcherTimer);
+    configWatcherTimer = setTimeout(() => {
+        configWatcherTimer = undefined;
+        if (ownedChild?.kind !== 'headless') return;
+        log('配置文件已变更，重启后台代理');
+        void (async () => {
+            killOwnedChild();
+            await waitUntilStopped();
+            await startProxy(context, true);
+        })();
+    }, CONFIG_RESTART_DELAY_MS);
+}
+
+function configMtime(configPath: string): number | undefined {
+    try {
+        return fs.statSync(configPath).mtimeMs;
+    } catch {
+        return undefined;
+    }
+}
+
+/** 后台代理运行期间盯住配置文件：改了就重启代理让新配置生效 */
+function watchConfig(context: vscode.ExtensionContext, configPath: string): void {
+    // 只换监视器，不取消已排队的重启：启动过程中改的配置也要生效
+    configWatcher?.dispose();
+    configWatcher = undefined;
+    try {
+        configWatcher = vscode.workspace.createFileSystemWatcher(
+            new vscode.RelativePattern(vscode.Uri.file(path.dirname(configPath)), path.basename(configPath)));
+    } catch (err) {
+        log(`无法监视配置文件: ${err instanceof Error ? err.message : String(err)}`);
+        return;
+    }
+    configWatcher.onDidChange(() => scheduleConfigRestart(context));
+    configWatcher.onDidCreate(() => scheduleConfigRestart(context));
+    configWatcher.onDidDelete(() => {
+        if (ownedChild?.kind === 'headless') {
+            log('配置文件已删除，停止后台代理');
+            killOwnedChild();
+            void waitUntilStopped().then(() => pollHealth());
+        }
+    });
 }
 
 // ── 命令实现 ──────────────────────────────────────────────
 
-async function startProxy(context: vscode.ExtensionContext): Promise<void> {
+/**
+ * 配置里的端口才是代理真正的监听端口。与 baseUrl 不一致时把 baseUrl 改成一致的；
+ * 用户显式设置过 baseUrl 则先询问。返回是否可以继续启动。
+ */
+async function alignPortWithConfig(summary: ProxyConfigSummary, silent: boolean): Promise<boolean> {
+    const port = summary.port ?? DEFAULT_PORT;
+    const urlPort = portOf(getBaseUrl());
+    if (port === urlPort) return true;
+
+    const target = `http://127.0.0.1:${port}`;
+    const info = getConfig().inspect<string>('baseUrl');
+    const scope = info?.workspaceValue !== undefined
+        ? vscode.ConfigurationTarget.Workspace
+        : info?.workspaceFolderValue !== undefined
+            ? vscode.ConfigurationTarget.WorkspaceFolder
+            : info?.globalValue !== undefined ? vscode.ConfigurationTarget.Global : undefined;
+
+    if (scope === undefined) {
+        // 只是默认值对不上，直接采用配置文件的端口
+        await getConfig().update('baseUrl', target, vscode.ConfigurationTarget.Global);
+        return true;
+    }
+    if (silent) {
+        // 自动启动不弹询问：保持用户的设置，等手动启动时再问
+        log(`配置文件端口 ${port} 与 baseUrl 端口 ${urlPort} 不一致，已跳过自动启动`);
+        return false;
+    }
+    const pick = await vscode.window.showWarningMessage(
+        `配置文件的端口是 ${port}，与插件设置 baseUrl 的端口 ${urlPort} 不一致，启动后插件会连不上代理。`,
+        '改用配置文件的端口',
+        '取消',
+    );
+    if (pick !== '改用配置文件的端口') return false;
+    await getConfig().update('baseUrl', target, scope);
+    return true;
+}
+
+/**
+ * 后台启动代理（--headless）。silent=true 用于 VS Code 启动时的自动拉起与配置变更后的重启：
+ * 不弹"未配置 / 端口不一致"之类的询问。
+ */
+async function startProxy(context: vscode.ExtensionContext, silent = false): Promise<void> {
+    if (starting) return;
+    starting = true; // 整个启动过程（含等待 /health）只允许一个在进行
+    try {
+        await startProxyInner(context, silent);
+    } finally {
+        starting = false;
+    }
+}
+
+async function startProxyInner(context: vscode.ExtensionContext, silent: boolean): Promise<void> {
     if (await checkHealth()) {
-        vscode.window.showInformationMessage(`代理已在运行: ${getBaseUrl()}`);
+        if (!silent) void vscode.window.showInformationMessage(`代理已在运行: ${getBaseUrl()}`);
+        return;
+    }
+    if (ownedChild?.kind === 'gui') {
+        if (!silent) void vscode.window.showInformationMessage('代理窗口已经打开，请在窗口里点「启动代理」');
         return;
     }
 
-    const exePath = (getConfig().get<string>('executablePath') ?? '').trim();
-    if (!exePath || !fs.existsSync(exePath)) {
-        const choice = await vscode.window.showErrorMessage(
-            '未配置 Vs2026ChatProxy.exe 路径（或文件不存在），无法启动代理',
-            '打开设置',
-        );
-        if (choice === '打开设置') {
-            await vscode.commands.executeCommand('workbench.action.openSettings', 'vschatproxy.executablePath');
+    const exe = resolveProxyExe(getConfig().get<string>('executablePath') ?? '', context.extensionPath);
+    if (!exe.exe) {
+        log(`无法启动代理：${exe.problem}`);
+        if (!silent) {
+            const pick = await vscode.window.showErrorMessage(`无法启动代理：${exe.problem}`, '打开设置');
+            if (pick === '打开设置') {
+                void vscode.commands.executeCommand('workbench.action.openSettings', 'vschatproxy.executablePath');
+            }
         }
         return;
     }
 
-    // 从 baseUrl 提取端口，写入默认配置模板
-    let port = 11434;
-    try {
-        port = new URL(getBaseUrl()).port ? Number(new URL(getBaseUrl()).port) : 11434;
-    } catch { /* 用默认值 */ }
-    const configPath = await proxyConfigPath(context);
-    await ensureProxyConfig(configPath, port);
+    const configPath = resolveProxyConfigPath(getConfig().get<string>('configPath') ?? '', context.globalStorageUri.fsPath);
+    const summary = readProxyConfig(configPath);
+    if (!summary || summary.providerCount === 0) {
+        // 没有任何供应商：后台起来也没有模型可用，直接引导去代理窗口配置
+        log(summary?.error ? `配置文件无法解析: ${summary.error}` : `配置里还没有供应商（${configPath}）`);
+        if (silent) return;
+        const pick = await vscode.window.showInformationMessage(
+            summary?.error
+                ? `代理配置文件无法解析：${summary.error}`
+                : '还没有配置任何供应商（模型 API）。在代理窗口里添加后即可使用。',
+            ...(summary?.error ? ['打开配置文件'] : ['打开代理窗口']),
+        );
+        if (pick === '打开代理窗口') {
+            void openProxyWindow(context);
+        } else if (pick === '打开配置文件') {
+            void openConfig(context);
+        }
+        return;
+    }
+    if (!(await alignPortWithConfig(summary, silent))) return;
 
-    vscode.window.withProgress(
+    let exited = false;
+    await fs.promises.mkdir(path.dirname(configPath), { recursive: true });
+    log(`启动后台代理: ${exe.exe} --config ${configPath}`);
+    const mtimeBeforeStart = configMtime(configPath);
+    const child = cp.spawn(exe.exe, ['--headless', '--config', configPath, '--parent-pid', String(process.pid)], {
+        windowsHide: true,
+    });
+    let stderr = '';
+    child.stderr?.on('data', (chunk) => { stderr += String(chunk); });
+    trackChild(child, 'headless');
+    child.once('exit', () => { exited = true; });
+
+    const ok = await vscode.window.withProgress(
         { location: vscode.ProgressLocation.Notification, title: 'VsChatProxy: 正在启动代理…' },
-        async (progress) => {
-            progress.report({ message: `拉起 ${path.basename(exePath)} --headless` });
-            ownedChild = cp.spawn(exePath, ['--headless', '--config', configPath], {
-                windowsHide: true,
-            });
-            ownedChild.on('exit', () => {
-                ownedChild = undefined;
-                updateStatusBar(false);
-            });
-            // 出错输出写日志文件（headless 模式自身写 proxy_*.log），这里静默即可
-            ownedChild.stderr?.on('data', () => { /* 进程级错误通过 exit 事件体现 */ });
-
-            progress.report({ message: '等待 /health 就绪' });
-            for (let i = 0; i < 30; i++) {
-                await new Promise((r) => setTimeout(r, 500));
-                if (await checkHealth()) {
-                    vscode.window.showInformationMessage(`代理已启动: ${getBaseUrl()}`);
-                    updateStatusBar(true);
-                    modelsProvider?.refresh();
-                    return;
-                }
-                if (ownedChild === undefined) {
-                    break; // 进程已退出
-                }
+        async () => {
+            for (let i = 0; i < START_WAIT_ROUNDS; i++) {
+                await sleep(START_WAIT_MS);
+                if (exited) return false;
+                if (await checkHealth()) return true;
             }
-            vscode.window.showErrorMessage(
-                `代理启动失败（进程可能立即退出，请检查配置文件: ${configPath}）`,
-            );
-        },
-    );
+            return false;
+        });
+
+    if (ok) {
+        log(`代理已启动: ${getBaseUrl()}`);
+        void pollHealth();
+        watchConfig(context, configPath);
+        // 启动那段时间（监视器还没建好）配置又被改过：补一次重启，别让那次修改丢掉
+        if (configMtime(configPath) !== mtimeBeforeStart) {
+            log('启动期间配置文件有变动，再重启一次');
+            scheduleConfigRestart(context);
+        }
+        if (!silent) {
+            // 还没把代理注册进 VS Code 聊天模型时，顺手给个入口（不阻塞启动流程）
+            void isChatModelRegistered().then(async (registered) => {
+                const buttons = registered ? [] : ['配置 VS Code 聊天模型'];
+                const pick = await vscode.window.showInformationMessage(`代理已启动: ${getBaseUrl()}`, ...buttons);
+                if (pick === '配置 VS Code 聊天模型') void configureChatModels();
+            });
+        }
+        return;
+    }
+
+    // 没就绪：结束进程，把日志尾部亮出来
+    killOwnedChild();
+    await waitUntilStopped();
+    const hint = lastLogLines(configPath) ?? stderr.trim().slice(-400);
+    log(`代理启动失败\n${hint ?? '(无日志输出)'}`);
+    if (!silent) {
+        const pick = await vscode.window.showErrorMessage(
+            `代理启动失败${exited ? '（进程已退出）' : '（/health 一直未就绪）'}。\n${hint ?? ''}`,
+            '打开配置文件',
+        );
+        if (pick === '打开配置文件') void openConfig(context);
+    }
 }
 
 function stopProxy(): void {
-    if (!ownedChild) {
-        vscode.window.showWarningMessage('代理不是由本插件启动的（或已在运行外部实例），请自行停止');
+    if (!killOwnedChild()) {
+        void vscode.window.showWarningMessage('代理不是本插件启动的（例如在 VS 2026 的工具窗口里运行），请在那里停止');
         return;
     }
-    ownedChild.kill();
-    ownedChild = undefined;
-    updateStatusBar(false);
-    vscode.window.showInformationMessage('已停止代理进程');
+    void waitUntilStopped().then(() => pollHealth());
+    void vscode.window.showInformationMessage('已停止代理');
+}
+
+/**
+ * 打开代理自带的设置窗口（独立 exe 的界面），在里面添加/修改供应商、启停代理。
+ * 后台代理在运行时先停掉，把端口让给窗口。
+ */
+async function openProxyWindow(context: vscode.ExtensionContext): Promise<void> {
+    const exe = resolveProxyExe(getConfig().get<string>('executablePath') ?? '', context.extensionPath);
+    if (!exe.exe) {
+        void vscode.window.showErrorMessage(`无法打开代理窗口：${exe.problem}`);
+        return;
+    }
+    const configPath = resolveProxyConfigPath(getConfig().get<string>('configPath') ?? '', context.globalStorageUri.fsPath);
+    if (ownedChild?.kind === 'gui' && ownedChild.proc.exitCode === null) {
+        void vscode.window.showInformationMessage('代理窗口已经打开（可能被其他窗口挡住了）');
+        return;
+    }
+    await fs.promises.mkdir(path.dirname(configPath), { recursive: true });
+
+    let handedOver = false;
+    if (await checkHealth()) {
+        if (ownedChild?.kind === 'headless') {
+            killOwnedChild();
+            await waitUntilStopped();
+            handedOver = true;
+        } else {
+            void vscode.window.showInformationMessage(
+                '代理正在别处运行（例如 VS 2026 的工具窗口）。代理窗口里只能修改配置，里面的「启动代理」会因端口被占用而失败。');
+        }
+    }
+
+    log(`打开代理窗口: ${exe.exe} --config ${configPath}`);
+    const child = cp.spawn(exe.exe, ['--config', configPath], { windowsHide: false });
+    trackChild(child, 'gui');
+    if (handedOver) {
+        void vscode.window.showInformationMessage('后台代理已停止，请在代理窗口里点「启动代理」（或关闭窗口后再从状态栏后台启动）');
+    }
+}
+
+async function isChatModelRegistered(): Promise<boolean> {
+    const filePath = chatModelsFilePath();
+    const url = chatProviderUrl();
+    try {
+        if (!fs.existsSync(filePath)) return false;
+        const parsed = JSON.parse(await fs.promises.readFile(filePath, 'utf-8')) as unknown;
+        return Array.isArray(parsed)
+            && parsed.some((e) => typeof e === 'object' && e !== null
+                && (e as { name?: string; url?: string }).name === CHAT_PROVIDER_NAME
+                && (e as { url?: string }).url === url);
+    } catch {
+        return false;
+    }
 }
 
 async function configureChatModels(): Promise<void> {
     const filePath = chatModelsFilePath();
-    const url = `${getBaseUrl()}/v1`;
+    const url = chatProviderUrl();
     const entry = {
-        name: 'VsChatProxy',
+        name: CHAT_PROVIDER_NAME,
         vendor: 'customendpoint',
         apiType: 'chat-completions',
         url,
@@ -206,7 +466,7 @@ async function configureChatModels(): Promise<void> {
 
         // 替换同名条目，否则追加
         const idx = list.findIndex(
-            (e) => typeof e === 'object' && e !== null && (e as { name?: string }).name === 'VsChatProxy',
+            (e) => typeof e === 'object' && e !== null && (e as { name?: string }).name === CHAT_PROVIDER_NAME,
         );
         if (idx >= 0) {
             list[idx] = entry;
@@ -231,31 +491,35 @@ async function configureChatModels(): Promise<void> {
 }
 
 async function openConfig(context: vscode.ExtensionContext): Promise<void> {
-    // 优先打开插件 globalStorage 下的配置；若代理在别处运行，也可手动浏览
-    const configPath = await proxyConfigPath(context);
-    const target = fs.existsSync(configPath)
-        ? vscode.Uri.file(configPath)
-        : await vscode.window.showOpenDialog({
-            title: '选择 proxy-config.json',
-            filters: { 'JSON 配置': ['json'] },
-            canSelectMany: false,
-        }).then((uris) => uris?.[0]);
-    if (target) {
-        await vscode.window.showTextDocument(target);
+    const configPath = resolveProxyConfigPath(getConfig().get<string>('configPath') ?? '', context.globalStorageUri.fsPath);
+    if (!fs.existsSync(configPath)) {
+        const pick = await vscode.window.showInformationMessage(
+            `还没有代理配置文件：\n${configPath}\n在代理窗口里添加供应商会自动创建。`,
+            '打开代理窗口',
+            '新建空白配置',
+        );
+        if (pick === '打开代理窗口') {
+            void openProxyWindow(context);
+            return;
+        }
+        if (pick !== '新建空白配置') return;
+        await fs.promises.mkdir(path.dirname(configPath), { recursive: true });
+        await fs.promises.writeFile(configPath, JSON.stringify(templateConfig(portOf(getBaseUrl()) ?? DEFAULT_PORT), null, 2), 'utf-8');
     }
+    await vscode.window.showTextDocument(vscode.Uri.file(configPath));
 }
 
 // ── 状态栏 & 轮询 ────────────────────────────────────────
 
 function updateStatusBar(running: boolean): void {
     if (running) {
-        statusBarItem.text = `$(plug) 代理`;
+        statusBarItem.text = '$(plug) 代理';
         statusBarItem.tooltip = `VsChatProxy 运行中: ${getBaseUrl()}（点击查看命令）`;
         statusBarItem.backgroundColor = undefined;
         statusBarItem.color = undefined;
     } else {
-        statusBarItem.text = `$(plug) 代理(停)`;
-        statusBarItem.tooltip = `VsChatProxy 未运行（点击查看命令）`;
+        statusBarItem.text = '$(plug) 代理(停)';
+        statusBarItem.tooltip = 'VsChatProxy 未运行（点击：启动代理 / 打开代理窗口配置供应商）';
         statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
     }
     statusBarItem.show();
@@ -326,8 +590,6 @@ function fmtContext(n: number): string {
         : n >= 1000 ? `${Math.round(n / 1000)}K`
         : String(n);
 }
-
-// ── 入口 ─────────────────────────────────────────────────
 
 // ── 自动更新（GitHub Releases）──────────────────────────
 
@@ -417,7 +679,14 @@ async function checkForUpdate(context: vscode.ExtensionContext, notifyUser = fal
     }
 }
 
+// ── 入口 ─────────────────────────────────────────────────
+
 export function activate(context: vscode.ExtensionContext): void {
+    output = vscode.window.createOutputChannel('VsChatProxy');
+    context.subscriptions.push(output);
+    log(`插件 ${String(context.extension.packageJSON?.version ?? '?')} 激活；代理程序: ${resolveProxyExe('', context.extensionPath).exe ?? '(未内置)'}`);
+    log(`配置文件: ${resolveProxyConfigPath(getConfig().get<string>('configPath') ?? '', context.globalStorageUri.fsPath)}；代理地址: ${getBaseUrl()}`);
+
     statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
     statusBarItem.command = 'vschatproxy.statusMenu';
 
@@ -431,7 +700,14 @@ export function activate(context: vscode.ExtensionContext): void {
 
     register('vschatproxy.start', () => startProxy(context));
     register('vschatproxy.stop', () => stopProxy());
-    register('vschatproxy.configureChatModels', () => configureChatModels());
+    register('vschatproxy.openWindow', () => openProxyWindow(context));
+    register('vschatproxy.configureChatModels', async () => {
+        await configureChatModels();
+        if (!(await checkHealth())) {
+            const pick = await vscode.window.showInformationMessage('代理还没运行，现在后台启动吗？', '启动代理');
+            if (pick === '启动代理') void startProxy(context);
+        }
+    });
     // 树视图自带 `${viewId}.focus` 命令，直接转发
     register('vschatproxy.showModels', () => vscode.commands.executeCommand('vschatproxy.models.focus'));
     register('vschatproxy.refreshModels', () => modelsProvider?.refresh());
@@ -446,20 +722,24 @@ export function activate(context: vscode.ExtensionContext): void {
         const pick = await vscode.window.showQuickPick(
             [
                 { label: running ? '$(check) 代理运行中' : '$(circle-slash) 代理未运行', description: getBaseUrl(), kind: vscode.QuickPickItemKind.Separator },
-                { label: '$(play) 启动代理', description: '后台拉起独立 exe（--headless）' },
-                { label: '$(debug-stop) 停止代理', description: '结束本插件拉起的进程' },
-                { label: '$(settings-gear) 配置 VS Code 聊天模型', description: '写入 chatLanguageModels.json' },
-                { label: '$(list-unordered) 查看模型列表' },
-                { label: '$(go-to-file) 打开配置文件' },
+                { label: MENU_START, description: '后台拉起代理，不显示窗口' },
+                { label: MENU_WINDOW, description: '代理自带的设置界面：添加供应商、看日志' },
+                { label: MENU_STOP, description: '结束本插件拉起的进程' },
+                { label: MENU_CONFIGURE, description: '写入 chatLanguageModels.json' },
+                { label: MENU_MODELS },
+                { label: MENU_OPEN_CONFIG },
+                { label: MENU_UPDATE },
             ],
             { placeHolder: 'VsChatProxy' },
         );
         switch (pick?.label) {
-            case '$(play) 启动代理': void vscode.commands.executeCommand('vschatproxy.start'); break;
-            case '$(debug-stop) 停止代理': void vscode.commands.executeCommand('vschatproxy.stop'); break;
-            case '$(settings-gear) 配置 VS Code 聊天模型': void vscode.commands.executeCommand('vschatproxy.configureChatModels'); break;
-            case '$(list-unordered) 查看模型列表': void vscode.commands.executeCommand('vschatproxy.showModels'); break;
-            case '$(go-to-file) 打开配置文件': void vscode.commands.executeCommand('vschatproxy.openConfig'); break;
+            case MENU_START: void vscode.commands.executeCommand('vschatproxy.start'); break;
+            case MENU_WINDOW: void vscode.commands.executeCommand('vschatproxy.openWindow'); break;
+            case MENU_STOP: void vscode.commands.executeCommand('vschatproxy.stop'); break;
+            case MENU_CONFIGURE: void vscode.commands.executeCommand('vschatproxy.configureChatModels'); break;
+            case MENU_MODELS: void vscode.commands.executeCommand('vschatproxy.showModels'); break;
+            case MENU_OPEN_CONFIG: void vscode.commands.executeCommand('vschatproxy.openConfig'); break;
+            case MENU_UPDATE: void vscode.commands.executeCommand('vschatproxy.checkUpdate'); break;
         }
     });
 
@@ -468,14 +748,14 @@ export function activate(context: vscode.ExtensionContext): void {
     // 初始状态 + 轮询
     void pollHealth();
     pollTimer = setInterval(() => void pollHealth(), HEALTH_POLL_MS);
-    context.subscriptions.push({ dispose: () => pollTimer && clearInterval(pollTimer) });
+    context.subscriptions.push({ dispose: () => { if (pollTimer) clearInterval(pollTimer); } });
 
-    // 自动启动
+    // 自动启动：代理没在运行且配置里已有供应商时后台拉起
     const autoStart = getConfig().get<boolean>('autoStart') ?? false;
     if (autoStart) {
         void checkHealth().then((h) => {
             if (!h) {
-                void startProxy(context);
+                void startProxy(context, true);
             }
         });
     }
@@ -485,7 +765,12 @@ export function activate(context: vscode.ExtensionContext): void {
 }
 
 export function deactivate(): void {
-    ownedChild?.kill();
+    // 后台代理随插件停止；代理窗口是用户看得见的独立窗口，留着
+    if (ownedChild?.kind === 'headless') {
+        ownedChild.proc.kill();
+        ownedChild = undefined;
+    }
+    stopWatchingConfig();
     if (pollTimer) {
         clearInterval(pollTimer);
     }

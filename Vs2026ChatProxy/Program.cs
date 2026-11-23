@@ -37,7 +37,7 @@ namespace Vs2026ChatProxy
             // --headless：无窗口后台模式（供 VS Code 插件等外部宿主拉起）
             if (HasArg(args, "--headless"))
             {
-                RunHeadless(configPath);
+                RunHeadless(configPath, ParseIntArg(args, "--parent-pid"));
                 return;
             }
 
@@ -52,12 +52,25 @@ namespace Vs2026ChatProxy
             return false;
         }
 
+        /// <summary>取带值的开关参数（如 --parent-pid 1234）；缺失或非法返回 0</summary>
+        private static int ParseIntArg(string[] args, string name)
+        {
+            for (int i = 0; i < args.Length - 1; i++)
+            {
+                if (string.Equals(args[i], name, StringComparison.OrdinalIgnoreCase)
+                    && int.TryParse(args[i + 1], out var value) && value > 0)
+                    return value;
+            }
+            return 0;
+        }
+
         /// <summary>
         /// 后台模式：直接启动代理服务，不显示窗口。
         /// 日志写入配置文件同目录（与 UI 模式相同的 proxy_*.log 约定）。
-        /// 进程由外部宿主管理生命周期（直接结束进程即可停止）。
+        /// 进程由外部宿主管理生命周期（直接结束进程即可停止）；
+        /// 给了 parentPid 时，宿主进程没了（崩溃/被强杀）自己也跟着退出，不留残余进程占着端口。
         /// </summary>
-        private static void RunHeadless(string configPath)
+        private static void RunHeadless(string configPath, int parentPid = 0)
         {
             var configDir = Path.GetDirectoryName(Path.GetFullPath(configPath));
             if (string.IsNullOrEmpty(configDir)) configDir = AppContext.BaseDirectory;
@@ -83,6 +96,22 @@ namespace Vs2026ChatProxy
 
                 // 阻塞直到进程被终止
                 using var mre = new ManualResetEvent(false);
+
+                // 宿主进程退出后自己退出（先于 mre 释放，避免定时器回调访问已释放对象）
+                using var parentWatch = parentPid > 0
+                    ? new System.Threading.Timer(_ =>
+                    {
+                        bool gone;
+                        try
+                        {
+                            using var parent = System.Diagnostics.Process.GetProcessById(parentPid);
+                            gone = parent.HasExited;
+                        }
+                        catch { gone = true; } // 宿主进程已不存在
+                        if (gone) { try { mre.Set(); } catch { } }
+                    }, null, 2000, 2000)
+                    : null;
+
                 Console.CancelKeyPress += (_, e) => { e.Cancel = true; mre.Set(); };
                 AppDomain.CurrentDomain.ProcessExit += (_, _) => mre.Set();
                 mre.WaitOne();
