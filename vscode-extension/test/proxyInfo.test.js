@@ -7,8 +7,11 @@ const path = require('path');
 const { execFileSync } = require('node:child_process');
 const info = require('../out/proxyInfo');
 
-function tempDir() {
-    return fs.mkdtempSync(path.join(os.tmpdir(), 'vschatproxy-test-'));
+/** 临时目录，测试结束时自动删除 */
+function tempDir(t) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vschatproxy-test-'));
+    t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+    return dir;
 }
 
 function write(file, content) {
@@ -17,7 +20,7 @@ function write(file, content) {
     return file;
 }
 
-test('normalizeBaseUrl: 去掉 /v1 与末尾斜杠，空值回退默认地址', () => {
+test('normalizeBaseUrl: 去掉 /v1 与末尾斜杠，空值回退默认地址', (t) => {
     assert.equal(info.normalizeBaseUrl('http://127.0.0.1:11434/v1'), 'http://127.0.0.1:11434');
     assert.equal(info.normalizeBaseUrl('http://127.0.0.1:11434/v1/'), 'http://127.0.0.1:11434');
     assert.equal(info.normalizeBaseUrl(' http://localhost:8080/// '), 'http://localhost:8080');
@@ -31,8 +34,8 @@ test('portOf: 显式端口 / 协议默认端口 / 非法地址', () => {
     assert.equal(info.portOf('not a url'), undefined);
 });
 
-test('resolveProxyExe: 设置优先，其次内置，都没有时给出说明', () => {
-    const dir = tempDir();
+test('resolveProxyExe: 设置优先，其次内置，都没有时给出说明', (t) => {
+    const dir = tempDir(t);
     const custom = write(path.join(dir, 'elsewhere', 'Vs2026ChatProxy.exe'), 'x');
     const bundled = write(path.join(dir, 'ext', 'proxy', 'Vs2026ChatProxy.exe'), 'x');
 
@@ -48,8 +51,8 @@ test('resolveProxyExe: 设置优先，其次内置，都没有时给出说明', 
     assert.match(broken.problem, /不存在/);
 });
 
-test('resolveProxyConfigPath: 设置了就用设置的，否则是插件自己的 globalStorage 配置', () => {
-    const dir = tempDir();
+test('resolveProxyConfigPath: 设置了就用设置的，否则是插件自己的 globalStorage 配置', (t) => {
+    const dir = tempDir(t);
     const storage = path.join(dir, 'storage');
     const own = path.join(storage, 'proxy-config.json');
     assert.equal(info.resolveProxyConfigPath('', storage), own);
@@ -59,8 +62,8 @@ test('resolveProxyConfigPath: 设置了就用设置的，否则是插件自己�
         path.join(os.homedir(), 'cfg', 'p.json'));
 });
 
-test('readProxyConfig: 文件不存在 / 供应商数量 / 非法 JSON', () => {
-    const dir = tempDir();
+test('readProxyConfig: 文件不存在 / 供应商数量 / 非法 JSON', (t) => {
+    const dir = tempDir(t);
     assert.equal(info.readProxyConfig(path.join(dir, 'none.json')), undefined);
 
     const ok = write(path.join(dir, 'ok.json'), JSON.stringify({ port: 12345, host: '127.0.0.1', providers: [{}, {}] }));
@@ -80,8 +83,8 @@ test('readProxyConfig: 文件不存在 / 供应商数量 / 非法 JSON', () => {
     assert.ok(parsedBad.error);
 });
 
-test('lastLogLines: 取最新日志的末尾几行，没有日志返回 undefined', () => {
-    const dir = tempDir();
+test('lastLogLines: 取最新日志的末尾几行，没有日志返回 undefined', (t) => {
+    const dir = tempDir(t);
     assert.equal(info.lastLogLines(path.join(dir, 'proxy-config.json')), undefined);
 
     const log = path.join(dir, 'proxy_1.log');
@@ -97,8 +100,8 @@ test('lastLogLines: 取最新日志的末尾几行，没有日志返回 undefine
     assert.equal(info.lastLogLines(path.join(dir, 'proxy-config.json'), 2), 'c\nd');
 });
 
-test('sync-proxy.js: 只拷 exe / dll / config，pdb 与日志不带；缺 exe 时报错退出', () => {
-    const dir = tempDir();
+test('sync-proxy.js: 只拷 exe / dll / config，pdb 与日志不带；缺 exe 时报错退出', (t) => {
+    const dir = tempDir(t);
     const src = path.join(dir, 'src');
     const dst = path.join(dir, 'dst');
     write(path.join(src, 'Vs2026ChatProxy.exe'), 'exe');

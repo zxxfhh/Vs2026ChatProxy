@@ -6,6 +6,13 @@ const os = require('os');
 const path = require('path');
 const cp = require('../out/chatProvider');
 
+/** 临时目录，测试结束时自动删除 */
+function tempDir(t) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vschatproxy-test-'));
+    t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+    return dir;
+}
+
 const URL_ = 'http://127.0.0.1:11434/v1';
 const DEFAULTS = { maxOutputTokens: 8192, maxInputTokens: 128000 };
 const model = (id, context) => ({ id, ...(context ? { model_info: { 'general.context_length': context } } : {}) });
@@ -68,13 +75,13 @@ test('describeRegistration: 未配置 / 旧格式 / 地址不一致 / 已注册'
     assert.deepEqual(cp.describeRegistration([{ name: 'VsChatProxy', vendor: 'customendpoint', models: 'x' }], 'VsChatProxy', URL_), { kind: 'otherUrl', index: 0 });
 });
 
-test('proxyModelsFromResponse / readChatModelsFile / sameIdSet', () => {
+test('proxyModelsFromResponse / readChatModelsFile / sameIdSet', (t) => {
     assert.deepEqual(cp.proxyModelsFromResponse({ object: 'list', data: [{ id: 'a:b', model_info: { 'general.context_length': 1000 } }, 'junk', { id: 'c' }] }),
         [{ id: 'a:b', model_info: { 'general.context_length': 1000 } }, { id: 'c', model_info: undefined }]);
     assert.deepEqual(cp.proxyModelsFromResponse({}), []);
     assert.deepEqual(cp.proxyModelsFromResponse(undefined), []);
 
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vschatproxy-test-'));
+    const dir = tempDir(t);
     const file = path.join(dir, 'chatLanguageModels.json');
     assert.deepEqual(cp.readChatModelsFile(file), []);
     fs.writeFileSync(file, '[{"name":"A","vendor":"a"}]');
@@ -83,7 +90,6 @@ test('proxyModelsFromResponse / readChatModelsFile / sameIdSet', () => {
     assert.deepEqual(cp.readChatModelsFile(file), []);
     fs.writeFileSync(file, '{ broken');
     assert.throws(() => cp.readChatModelsFile(file));
-    fs.rmSync(dir, { recursive: true, force: true });
 
     assert.equal(cp.sameIdSet(['a', 'b'], ['b', 'a', 'a']), true);
     assert.equal(cp.sameIdSet(['a'], ['a', 'b']), false);
